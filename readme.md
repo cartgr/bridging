@@ -9,6 +9,8 @@ This repository contains experiments on measuring and estimating bridging scores
 - [Experiment 1: Approval Rate vs. Approver Diversity](#experiment-1-approval-rate-vs-approver-diversity)
 - [Experiment 2: Bridging Score Estimation Under Pol.is Sampling](#experiment-2-bridging-score-estimation-under-polis-sampling)
 - [Experiment 3: Voter PCA Spectrum Visualization](#experiment-3-voter-pca-spectrum-visualization)
+- [Experiment 4: Synthetic Elections with Group Structure](#experiment-4-synthetic-elections-with-group-structure)
+- [Experiment 5: Robustness Comparison](#experiment-5-robustness-comparison)
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
 - [Tests](#tests)
@@ -163,33 +165,121 @@ See [experiment_3/README.md](experiment_3/README.md) for details.
 
 ---
 
+## Experiment 4: Synthetic Elections with Group Structure
+
+**Question:** How does bridging score behave analytically with known group structures?
+
+### Approach
+
+1. **Create synthetic elections** with two voter groups defined by disjoint comment approvals
+2. **Vary approval rates** (a₁, a₂) from each group for focal comments
+3. **Compute bridging scores** and compare to analytical expectations
+
+### Key Finding
+
+For equal-sized groups with between-group disagreement d≈1:
+```
+E[b] ≈ a₁ × a₂
+```
+
+Maximum bridging occurs when both groups fully approve.
+
+### Run
+
+```bash
+python experiment_4/analyze.py
+```
+
+### Output
+
+- `experiment_4/plots/equal_groups_3d.png` - Bridging surface for equal groups
+- `experiment_4/plots/unequal_groups_3d.png` - Bridging surface with constrained total support
+- Interactive HTML versions for 3D exploration
+
+See [experiment_4/README.md](experiment_4/README.md) for details.
+
+---
+
+## Experiment 5: Robustness Comparison
+
+**Question:** How robust are bridging/consensus metrics to missing data?
+
+### Methods Compared
+
+1. **Polis Group-Informed Consensus** - Product of per-group Laplace-smoothed approval rates
+2. **Bridging Score (Naive)** - Pairwise disagreement without correction
+3. **Bridging Score (IPW)** - With Inverse Probability Weighting correction
+
+### Two Conditions
+
+| Condition | Missingness | Methods | Purpose |
+|-----------|-------------|---------|---------|
+| MCAR | Uniform random | Naive vs Polis | Baseline |
+| Simulated | Polis routing (PCA-based) | Naive vs IPW vs Polis | Realistic |
+
+### Run
+
+```bash
+# MCAR experiment (faster)
+python experiment_5/run_experiment.py
+
+# Simulation experiment (slower, more realistic)
+python experiment_5/run_simulation_experiment.py
+```
+
+### MCAR Results
+
+Bridging wins 39, Polis wins 0, Ties 3 (across all datasets and mask rates).
+
+See [experiment_5/README.md](experiment_5/README.md) for details.
+
+---
+
 ## Project Structure
 
 ```
 bridging/
-├── readme.md                 # This file
+├── README.md                 # This file
 ├── data/
 │   ├── processed/preflib/    # Raw data
 │   └── completed/            # Matrix-completed data
-├── experiment_1/
+├── experiment_1/             # Approval rate vs diversity
 │   ├── README.md
-│   ├── analyze.py            # Main script
-│   └── plots/                # Output plots
-├── experiment_2/
+│   ├── analyze.py
+│   └── plots/
+├── experiment_2/             # IPW estimation under Polis sampling
 │   ├── README.md
 │   ├── bridging.py           # Ground truth computation
 │   ├── priority.py           # Pol.is priority formula
 │   ├── simulation.py         # Routing simulation
 │   ├── estimation.py         # IPW estimation
 │   ├── evaluate.py           # Metrics
-│   ├── run_experiment.py     # Main runner
-│   ├── tests/                # Unit & integration tests
-│   └── results/              # Output JSON files
-└── experiment_3/
+│   ├── run_experiment.py
+│   ├── tests/
+│   └── results/
+├── experiment_3/             # Voter PCA spectrum visualization
+│   ├── README.md
+│   ├── visualize.py
+│   ├── plots/
+│   └── plots_histogram/
+├── experiment_4/             # Synthetic elections
+│   ├── README.md
+│   ├── synthetic.py          # Generate synthetic matrices
+│   ├── analyze.py
+│   └── plots/
+└── experiment_5/             # Robustness comparison
     ├── README.md
-    ├── visualize.py          # Visualization script
-    ├── plots/                # Ridgeline plots
-    └── plots_histogram/      # Histogram plots
+    ├── polis.py              # Polis consensus implementation
+    ├── masking.py            # Random masking utilities
+    ├── robustness.py         # MCAR experiment
+    ├── robustness_simulated.py  # Simulation experiment
+    ├── evaluate.py
+    ├── visualize.py
+    ├── run_experiment.py     # MCAR runner
+    ├── run_simulation_experiment.py  # Simulation runner
+    ├── tests/
+    ├── results/
+    └── plots/
 ```
 
 ## Requirements
@@ -199,15 +289,20 @@ bridging/
 - scipy
 - matplotlib
 - tqdm
+- scikit-learn (for experiment 5)
+- plotly (optional, for experiment 4 interactive plots)
 
 ## Tests
 
 ```bash
-# Run all experiment_2 tests
-pytest experiment_2/tests/ -v
+# Run all tests
+pytest experiment_2/tests/ experiment_5/tests/ -v
 
 # Quick tests only
 pytest experiment_2/tests/ -v -m "not slow"
+
+# Experiment 5 tests
+pytest experiment_5/tests/ -v
 ```
 
 ## References
