@@ -8,10 +8,10 @@ Bridging comments are approved by voters who otherwise disagree. This repository
 
 | Experiment | Question | Run |
 |------------|----------|-----|
-| [1. Approval vs Diversity](experiment_1/) | Does popularity correlate with supporter diversity? | `python experiment_1/analyze.py` |
+| [1. Approval vs Diversity](experiment_1/) | How do bridging metrics balance approval vs approver diversity? | `python experiment_1/analyze.py` |
 | [2. IPW Estimation](experiment_2/) | Can we estimate bridging under informative missingness? | `python experiment_2/run_experiment.py` |
-| [3. PCA Spectrum](experiment_3/) | How do approvals distribute across the political spectrum? | `python experiment_3/visualize.py` |
-| [4. Synthetic Elections](experiment_4/) | What is the analytical form of bridging? | `python experiment_4/analyze.py` |
+| [3. PCA Spectrum](experiment_3/) | Do bridging candidates draw support from across the spectrum? | `python experiment_3/visualize.py` |
+| [4. Synthetic Elections](experiment_4/) | How do group sizes and approval rates affect bridging? | `python experiment_4/analyze.py` |
 | [5. Robustness](experiment_5/) | How robust is bridging vs Polis consensus? | `python experiment_5/run_experiment.py` |
 
 ## Data
