@@ -117,11 +117,15 @@ Two visualization styles are available:
 - **Color gradient** = blue (left) to red (right) based on PC1 position
 - Shows both approval volume and distribution shape
 
+![Ridgeline Plot Example](experiment_3/plots/00026-00000001.png)
+
 #### Histogram Plot (`--histogram`)
 - **Bar height** = number of voters in each bin (same for all candidates)
 - **Blue portion** = approval rate at that position
 - **Grey portion** = disapproval rate
 - Shows approval rate across the spectrum
+
+![Histogram Plot Example](experiment_3/plots_histogram/00026-00000001.png)
 
 ### Run
 
