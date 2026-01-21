@@ -13,6 +13,7 @@ Bridging comments are approved by voters who otherwise disagree. This repository
 | [3. PCA Spectrum](experiment_3/) | Do bridging candidates draw support from across the spectrum? | `python experiment_3/visualize.py` |
 | [4. Synthetic Elections](experiment_4/) | How do group sizes and approval rates affect bridging? | `python experiment_4/analyze.py` |
 | [5. Robustness](experiment_5/) | How robust is bridging vs Polis consensus? | `python experiment_5/run_experiment.py` |
+| [6. Real Pol.is Rankings](experiment_6/) | Do methods rank real Pol.is comments differently? | `python experiment_6/analyze.py` |
 
 ## Data
 
