@@ -99,6 +99,54 @@ See [experiment_2/README.md](experiment_2/README.md) for full technical details.
 
 ---
 
+## Experiment 3: Voter PCA Spectrum Visualization
+
+**Question:** How are approvals distributed across the political spectrum for each candidate/comment?
+
+### Approach
+
+1. **Position voters** on a 1D spectrum using PCA (PC1 captures dominant axis of variation)
+2. **Visualize approval patterns** for each candidate/comment
+
+### Visualizations
+
+Two visualization styles are available:
+
+#### Ridgeline Plot (default)
+- **Height** = unnormalized density of approvers (preserves count info)
+- **Color gradient** = blue (left) to red (right) based on PC1 position
+- Shows both approval volume and distribution shape
+
+#### Histogram Plot (`--histogram`)
+- **Bar height** = number of voters in each bin (same for all candidates)
+- **Blue portion** = approval rate at that position
+- **Grey portion** = disapproval rate
+- Shows approval rate across the spectrum
+
+### Run
+
+```bash
+# Ridgeline plots
+python experiment_3/visualize.py
+
+# Histogram plots
+python experiment_3/visualize.py --histogram
+```
+
+### Output
+
+- Ridgeline plots: `experiment_3/plots/`
+- Histogram plots: `experiment_3/plots_histogram/`
+
+### Interpretation
+
+- **Bridging candidates**: Approval (blue) spread across entire spectrum
+- **Polarizing candidates**: Approval concentrated on one side only
+
+See [experiment_3/README.md](experiment_3/README.md) for details.
+
+---
+
 ## Project Structure
 
 ```
@@ -111,16 +159,21 @@ bridging/
 │   ├── README.md
 │   ├── analyze.py            # Main script
 │   └── plots/                # Output plots
-└── experiment_2/
+├── experiment_2/
+│   ├── README.md
+│   ├── bridging.py           # Ground truth computation
+│   ├── priority.py           # Pol.is priority formula
+│   ├── simulation.py         # Routing simulation
+│   ├── estimation.py         # IPW estimation
+│   ├── evaluate.py           # Metrics
+│   ├── run_experiment.py     # Main runner
+│   ├── tests/                # Unit & integration tests
+│   └── results/              # Output JSON files
+└── experiment_3/
     ├── README.md
-    ├── bridging.py           # Ground truth computation
-    ├── priority.py           # Pol.is priority formula
-    ├── simulation.py         # Routing simulation
-    ├── estimation.py         # IPW estimation
-    ├── evaluate.py           # Metrics
-    ├── run_experiment.py     # Main runner
-    ├── tests/                # Unit & integration tests
-    └── results/              # Output JSON files
+    ├── visualize.py          # Visualization script
+    ├── plots/                # Ridgeline plots
+    └── plots_histogram/      # Histogram plots
 ```
 
 ## Requirements
@@ -128,6 +181,7 @@ bridging/
 - Python 3.9+
 - numpy
 - scipy
+- matplotlib
 - tqdm
 
 ## Tests
