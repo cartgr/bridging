@@ -2,6 +2,18 @@
 
 This repository contains experiments on measuring and estimating bridging scores in voting/approval data, with a focus on Pol.is-style deliberation platforms.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Data](#data)
+- [Experiment 1: Approval Rate vs. Approver Diversity](#experiment-1-approval-rate-vs-approver-diversity)
+- [Experiment 2: Bridging Score Estimation Under Pol.is Sampling](#experiment-2-bridging-score-estimation-under-polis-sampling)
+- [Experiment 3: Voter PCA Spectrum Visualization](#experiment-3-voter-pca-spectrum-visualization)
+- [Project Structure](#project-structure)
+- [Requirements](#requirements)
+- [Tests](#tests)
+- [References](#references)
+
 ## Overview
 
 **Bridging comments** are those approved by voters who otherwise disagree with each other. Identifying such comments is valuable for finding consensus in polarized discussions. These experiments explore:
