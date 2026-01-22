@@ -1,7 +1,7 @@
 """
-Compute correlations between approval rate, approver diversity, and PD bridging score.
+Compute correlations between approval rate, approver diversity, and bridging scores.
 
-Outputs summary statistics for French Election and Pol.is datasets separately.
+Compares both PD Bridging and Polis Consensus scores against approval and diversity.
 """
 
 import sys
@@ -12,6 +12,7 @@ from scipy.stats import pearsonr, spearmanr
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_5.polis import polis_consensus_pipeline
 
 
 def load_matrix(filepath):
@@ -61,12 +62,35 @@ def compute_all_correlations(files):
     ba_pearson, ba_spearman = [], []
     # PD bridging vs diversity
     bd_pearson, bd_spearman = [], []
+    # Polis vs approval
+    pa_pearson, pa_spearman = [], []
+    # Polis vs diversity
+    pd_pearson, pd_spearman = [], []
+    # PD bridging vs Polis
+    bp_pearson, bp_spearman = [], []
 
     for f in files:
         matrix = load_matrix(f)
-        rates = compute_approval_rates(matrix)
-        diversity = compute_approver_diversity(matrix)
-        bridging = compute_bridging_scores_vectorized(matrix)
+
+        # Skip files with NaN for Polis (needs complete or imputable data)
+        if np.isnan(matrix).any():
+            # For sparse data, create observed mask
+            observed_mask = ~np.isnan(matrix)
+            # Fill NaN with 0 for computations
+            matrix_filled = np.nan_to_num(matrix, nan=0.0)
+        else:
+            observed_mask = np.ones_like(matrix, dtype=bool)
+            matrix_filled = matrix
+
+        rates = compute_approval_rates(matrix_filled)
+        diversity = compute_approver_diversity(matrix_filled)
+        bridging = compute_bridging_scores_vectorized(matrix_filled)
+
+        # Compute Polis consensus scores
+        try:
+            polis_scores, _ = polis_consensus_pipeline(matrix_filled, observed_mask, seed=42)
+        except Exception:
+            continue
 
         valid = ~np.isnan(diversity)
         if valid.sum() < 3:
@@ -78,22 +102,43 @@ def compute_all_correlations(files):
         ad_pearson.append(r_p)
         ad_spearman.append(r_s)
 
-        # Bridging vs Approval
+        # PD Bridging vs Approval
         r_p, _ = pearsonr(bridging[valid], rates[valid])
         r_s, _ = spearmanr(bridging[valid], rates[valid])
         ba_pearson.append(r_p)
         ba_spearman.append(r_s)
 
-        # Bridging vs Diversity
+        # PD Bridging vs Diversity
         r_p, _ = pearsonr(bridging[valid], diversity[valid])
         r_s, _ = spearmanr(bridging[valid], diversity[valid])
         bd_pearson.append(r_p)
         bd_spearman.append(r_s)
 
+        # Polis vs Approval
+        r_p, _ = pearsonr(polis_scores[valid], rates[valid])
+        r_s, _ = spearmanr(polis_scores[valid], rates[valid])
+        pa_pearson.append(r_p)
+        pa_spearman.append(r_s)
+
+        # Polis vs Diversity
+        r_p, _ = pearsonr(polis_scores[valid], diversity[valid])
+        r_s, _ = spearmanr(polis_scores[valid], diversity[valid])
+        pd_pearson.append(r_p)
+        pd_spearman.append(r_s)
+
+        # PD Bridging vs Polis
+        r_p, _ = pearsonr(bridging[valid], polis_scores[valid])
+        r_s, _ = spearmanr(bridging[valid], polis_scores[valid])
+        bp_pearson.append(r_p)
+        bp_spearman.append(r_s)
+
     return {
         'approval_diversity': (ad_pearson, ad_spearman),
         'bridging_approval': (ba_pearson, ba_spearman),
         'bridging_diversity': (bd_pearson, bd_spearman),
+        'polis_approval': (pa_pearson, pa_spearman),
+        'polis_diversity': (pd_pearson, pd_spearman),
+        'bridging_polis': (bp_pearson, bp_spearman),
         'n': len(ad_pearson),
     }
 
@@ -108,10 +153,16 @@ def print_results(name, results):
         ('approval_diversity', 'Approval vs Diversity'),
         ('bridging_approval', 'PD Bridging vs Approval'),
         ('bridging_diversity', 'PD Bridging vs Diversity'),
+        ('polis_approval', 'Polis vs Approval'),
+        ('polis_diversity', 'Polis vs Diversity'),
+        ('bridging_polis', 'PD Bridging vs Polis'),
     ]
 
     for key, label in labels:
         pearson, spearman = results[key]
+        if len(pearson) == 0:
+            print(f"  {label}: N/A")
+            continue
         print(f"  {label}:")
         print(f"    Pearson:  {np.mean(pearson):>6.3f} ± {np.std(pearson):.3f}")
         print(f"    Spearman: {np.mean(spearman):>6.3f} ± {np.std(spearman):.3f}")
