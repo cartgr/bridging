@@ -26,7 +26,11 @@ from tqdm import tqdm
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_2.bridging import (
+    compute_bridging_scores_vectorized,
+    compute_bridging_pnorm,
+    compute_bridging_harmonic_pd,
+)
 from experiment_5.polis import polis_consensus_pipeline
 
 
@@ -140,17 +144,22 @@ def plot_approval_vs_diversity_colored(
     bridging_scores: np.ndarray,
     title: str,
     output_path: Path,
+    metric_name: str = 'PD Bridging Score',
 ) -> None:
     """
-    Create scatter plot colored by PD bridging score.
+    Create scatter plot colored by bridging score.
     """
     fig, ax = plt.subplots(figsize=(9, 6))
 
     # Filter out NaN values
-    valid_mask = ~np.isnan(diversity)
+    valid_mask = ~np.isnan(diversity) & ~np.isnan(bridging_scores)
     valid_rates = rates[valid_mask]
     valid_diversity = diversity[valid_mask]
     valid_bridging = bridging_scores[valid_mask]
+
+    if len(valid_bridging) == 0:
+        plt.close()
+        return
 
     # Color by bridging score using viridis
     norm = Normalize(vmin=valid_bridging.min(), vmax=valid_bridging.max())
@@ -163,11 +172,11 @@ def plot_approval_vs_diversity_colored(
 
     # Colorbar
     cbar = fig.colorbar(scatter, ax=ax, shrink=0.8)
-    cbar.set_label('PD Bridging Score', fontsize=10)
+    cbar.set_label(metric_name, fontsize=10)
 
     ax.set_xlabel('Approver Diversity (Hamming Distance)', fontsize=12)
     ax.set_ylabel('Approval Rate', fontsize=12)
-    ax.set_title(f'{title}\n(colored by PD bridging score)', fontsize=12)
+    ax.set_title(f'{title}\n(colored by {metric_name})', fontsize=12)
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -185,81 +194,95 @@ def plot_approval_vs_diversity_colored(
 def plot_top_comments_comparison(
     rates: np.ndarray,
     diversity: np.ndarray,
-    bridging_scores: np.ndarray,
-    polis_scores: np.ndarray,
+    all_scores: dict,
     title: str,
     output_path: Path,
     item_names: list = None,
 ) -> None:
     """
     Plot showing which comment each method ranks as most bridging.
+
+    Args:
+        all_scores: dict mapping metric name to scores array
     """
-    fig, ax = plt.subplots(figsize=(9, 6))
+    fig, ax = plt.subplots(figsize=(10, 7))
 
     # Filter out NaN values
     valid_mask = ~np.isnan(diversity)
     valid_indices = np.where(valid_mask)[0]
     valid_rates = rates[valid_mask]
     valid_diversity = diversity[valid_mask]
-    valid_bridging = bridging_scores[valid_mask]
-    valid_polis = polis_scores[valid_mask]
 
     # Plot all points in grey
     ax.scatter(valid_diversity, valid_rates, c='lightgrey', alpha=0.5,
                edgecolors='none', s=40, label='All items')
 
-    # Find top-1 for each method (among valid items)
-    pd_top_valid_idx = np.argmax(valid_bridging)
-    polis_top_valid_idx = np.argmax(valid_polis)
+    # Colors and markers for each metric
+    metric_styles = {
+        'PD Bridging': {'color': '#1b9e77', 'marker': 'o'},
+        'p-norm (p=-10)': {'color': '#d95f02', 'marker': 's'},
+        'p-norm (p=0)': {'color': '#7570b3', 'marker': '^'},
+        'Harmonic PD': {'color': '#e7298a', 'marker': 'D'},
+        'Polis': {'color': '#66a61e', 'marker': 'v'},
+    }
 
-    # Map back to original indices
-    pd_top_idx = valid_indices[pd_top_valid_idx]
-    polis_top_idx = valid_indices[polis_top_valid_idx]
+    stats_lines = []
+    plotted_positions = set()
 
-    # Get names if available
-    if item_names:
-        pd_name = item_names[pd_top_idx]
-        polis_name = item_names[polis_top_idx]
-    else:
-        pd_name = f"Item {pd_top_idx}"
-        polis_name = f"Item {polis_top_idx}"
+    for metric_name, scores in all_scores.items():
+        valid_scores = scores[valid_mask]
+        valid_scores_clean = np.where(np.isnan(valid_scores), -np.inf, valid_scores)
 
-    # Plot PD top (green/teal)
-    ax.scatter(
-        [diversity[pd_top_idx]], [rates[pd_top_idx]],
-        c='#1b9e77', s=200, marker='o', edgecolors='black', linewidths=2,
-        label=f'PD Top: {pd_name}', zorder=10
-    )
+        if np.all(np.isinf(valid_scores_clean)):
+            continue
 
-    # Plot Polis top (purple)
-    ax.scatter(
-        [diversity[polis_top_idx]], [rates[polis_top_idx]],
-        c='#7570b3', s=200, marker='s', edgecolors='black', linewidths=2,
-        label=f'Polis Top: {polis_name}', zorder=10
-    )
+        # Find top-1 for this metric
+        top_valid_idx = np.argmax(valid_scores_clean)
+        top_idx = valid_indices[top_valid_idx]
 
-    # If same comment, add note
-    if pd_top_idx == polis_top_idx:
-        ax.annotate('(Same comment)', xy=(0.98, 0.02), xycoords='axes fraction',
-                    fontsize=10, ha='right', style='italic')
+        # Get name
+        if item_names:
+            name = item_names[top_idx]
+        else:
+            name = f"Item {top_idx}"
+
+        style = metric_styles.get(metric_name, {'color': 'black', 'marker': 'x'})
+
+        # Slight offset if position already plotted
+        x_pos = diversity[top_idx]
+        y_pos = rates[top_idx]
+        pos_key = (round(x_pos, 3), round(y_pos, 3))
+        offset = 0
+        while pos_key in plotted_positions:
+            offset += 0.015
+            pos_key = (round(x_pos + offset, 3), round(y_pos, 3))
+        plotted_positions.add(pos_key)
+
+        ax.scatter(
+            [x_pos + offset], [y_pos],
+            c=style['color'], s=150, marker=style['marker'],
+            edgecolors='black', linewidths=1.5,
+            label=f'{metric_name}: {name}', zorder=10
+        )
+
+        stats_lines.append(
+            f"{metric_name}: {name} (appr={rates[top_idx]:.2f}, div={diversity[top_idx]:.2f})"
+        )
 
     ax.set_xlabel('Approver Diversity (Hamming Distance)', fontsize=12)
     ax.set_ylabel('Approval Rate', fontsize=12)
-    ax.set_title(f'{title}\nTop Bridging Comment: PD vs Polis', fontsize=12)
+    ax.set_title(f'{title}\nTop Bridging Item by Metric', fontsize=12)
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc='upper left', fontsize=9)
+    ax.legend(loc='upper left', fontsize=8, framealpha=0.9)
 
-    # Add stats
-    stats = (
-        f"PD top: approval={rates[pd_top_idx]:.2f}, diversity={diversity[pd_top_idx]:.2f}\n"
-        f"Polis top: approval={rates[polis_top_idx]:.2f}, diversity={diversity[polis_top_idx]:.2f}"
-    )
-    ax.annotate(stats, xy=(0.98, 0.98), xycoords='axes fraction',
-                fontsize=8, ha='right', va='top', family='monospace',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    # Add stats box
+    stats_text = '\n'.join(stats_lines)
+    ax.annotate(stats_text, xy=(0.98, 0.02), xycoords='axes fraction',
+                fontsize=7, ha='right', va='bottom', family='monospace',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -305,13 +328,12 @@ def main():
     for d in [plain_dir, colored_dir, comparison_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Define data sources
+    # Define data sources (excluding 00069 Pol.is - uses imputed data)
     data_sources = [
         ('data/processed/preflib', '00026-*.npz', 'French Election 2002'),
         ('data/processed/preflib', '00033-*.npz', 'San Sebastian Poster'),
         ('data/processed/preflib', '00063-*.npz', 'CTU Tutorial'),
         ('data/processed/preflib', '00071-*.npz', 'French Election 2007'),
-        ('data/completed', '00069-*.npz', 'Pol.is (Completed)'),
     ]
 
     all_files = []
@@ -336,12 +358,28 @@ def main():
         rates = compute_approval_rates(matrix)
         diversity = compute_approver_diversity(matrix)
 
-        # Compute PD bridging scores
-        bridging_scores = compute_bridging_scores_vectorized(matrix)
+        # Compute all bridging scores
+        pd_bridging = compute_bridging_scores_vectorized(matrix)
+        pnorm_min = compute_bridging_pnorm(matrix, p=-10)
+        pnorm_geo = compute_bridging_pnorm(matrix, p=0)
+        harmonic_pd = compute_bridging_harmonic_pd(matrix)
 
         # Compute Polis consensus scores
         observed_mask = np.ones_like(matrix, dtype=bool)  # Fully observed
-        polis_scores, _ = polis_consensus_pipeline(matrix, observed_mask)
+        try:
+            polis_scores, _ = polis_consensus_pipeline(matrix, observed_mask)
+        except Exception as e:
+            print(f"  Polis failed for {file_id}: {e}")
+            polis_scores = np.full(n_items, np.nan)
+
+        # Collect all scores for comparison plot
+        all_scores = {
+            'PD Bridging': pd_bridging,
+            'p-norm (p=-10)': pnorm_min,
+            'p-norm (p=0)': pnorm_geo,
+            'Harmonic PD': harmonic_pd,
+            'Polis': polis_scores,
+        }
 
         # Get item names
         if '00026' in file_id:
@@ -359,22 +397,34 @@ def main():
             plain_dir / f'{file_id}.png'
         )
 
-        # Plot 2: Colored by bridging score
-        plot_approval_vs_diversity_colored(
-            rates, diversity, bridging_scores, title,
-            colored_dir / f'{file_id}.png'
-        )
+        # Plot 2: Colored by each metric (create subdirectories)
+        metrics_to_plot = [
+            ('pd_bridging', pd_bridging, 'PD Bridging'),
+            ('pnorm_min', pnorm_min, 'p-norm (p=-10)'),
+            ('pnorm_geo', pnorm_geo, 'p-norm (p=0)'),
+            ('harmonic_pd', harmonic_pd, 'Harmonic PD'),
+            ('polis', polis_scores, 'Polis Consensus'),
+        ]
 
-        # Plot 3: Top comments comparison
+        for metric_key, scores, metric_label in metrics_to_plot:
+            metric_dir = colored_dir / metric_key
+            metric_dir.mkdir(parents=True, exist_ok=True)
+            plot_approval_vs_diversity_colored(
+                rates, diversity, scores, title,
+                metric_dir / f'{file_id}.png',
+                metric_name=metric_label
+            )
+
+        # Plot 3: Top comments comparison (all metrics)
         plot_top_comments_comparison(
-            rates, diversity, bridging_scores, polis_scores, title,
+            rates, diversity, all_scores, title,
             comparison_dir / f'{file_id}.png',
             item_names=item_names
         )
 
     print(f"\nPlots saved to:")
     print(f"  Plain: {plain_dir}/")
-    print(f"  Colored by PD: {colored_dir}/")
+    print(f"  Colored by metric: {colored_dir}/<metric>/")
     print(f"  Method comparison: {comparison_dir}/")
 
 

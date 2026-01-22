@@ -20,7 +20,12 @@ from typing import Optional
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_2.bridging import (
+    compute_bridging_scores_vectorized,
+    compute_bridging_pnorm,
+    compute_bridging_harmonic_pd,
+)
+from experiment_5.polis import polis_consensus_pipeline
 
 
 # French election 2002 candidate names (00026)
@@ -103,6 +108,7 @@ def plot_voter_spectrum(
     title: str,
     output_path: Path,
     fig_height: float = 12,
+    metric_name: str = 'Bridging',
 ) -> None:
     """
     Create ridgeline visualization for one polling station.
@@ -120,6 +126,7 @@ def plot_voter_spectrum(
         title: Plot title
         output_path: Where to save the plot
         fig_height: Figure height in inches
+        metric_name: Name of the bridging metric for column header
     """
     n_candidates = matrix.shape[0]
     n_voters = matrix.shape[1]
@@ -240,7 +247,7 @@ def plot_voter_spectrum(
             fontsize=11, fontweight='bold', ha='center')
     ax.text((pc1_min + pc1_max) / 2, n_candidates + 0.3, 'Voter Approval Distribution',
             fontsize=11, fontweight='bold', ha='center')
-    ax.text(pc1_max + x_margin + 0.4, n_candidates + 0.3, 'Bridging',
+    ax.text(pc1_max + x_margin + 0.4, n_candidates + 0.3, metric_name,
             fontsize=11, fontweight='bold', ha='center')
     ax.text(pc1_max + x_margin + 1.1, n_candidates + 0.3, 'Appr',
             fontsize=11, fontweight='bold', ha='center')
@@ -514,12 +521,12 @@ def process_dataset(
     max_items: Optional[int] = None,
 ) -> None:
     """
-    Process a single dataset file and generate ridgeline plot.
+    Process a single dataset file and generate ridgeline plots for all metrics.
 
     Args:
         filepath: Path to the .npz file
-        output_dir: Directory to save output plot
-        dataset_name: Name for the plot title (e.g., "French Election", "Pol.is")
+        output_dir: Directory to save output plots (will create metric subdirectories)
+        dataset_name: Name for the plot title (e.g., "French Election")
         item_names: Optional list of item names. If None, uses "Item 1", "Item 2", etc.
         max_items: Maximum number of items to display (top by bridging score). None for all.
     """
@@ -530,46 +537,90 @@ def process_dataset(
     n_items, n_voters = matrix.shape
     print(f"  {file_id}: {n_items} items, {n_voters} voters")
 
+    # Skip files with NaN values
+    if np.isnan(matrix).any():
+        print(f"    Skipping: contains NaN values")
+        return
+
     # Compute PC1 scores for voters
     pc1_scores = compute_voter_pca_scores(matrix)
 
-    # Compute bridging scores
-    bridging_scores = compute_bridging_scores_vectorized(matrix)
+    # Compute all bridging metrics
+    pd_bridging = compute_bridging_scores_vectorized(matrix)
+    pnorm_min = compute_bridging_pnorm(matrix, p=-10)
+    pnorm_geo = compute_bridging_pnorm(matrix, p=0)
+    harmonic_pd = compute_bridging_harmonic_pd(matrix)
+
+    # Compute Polis consensus scores
+    observed_mask = np.ones_like(matrix, dtype=bool)
+    try:
+        polis_scores, _ = polis_consensus_pipeline(matrix, observed_mask)
+    except Exception as e:
+        print(f"    Polis failed: {e}")
+        polis_scores = np.full(n_items, np.nan)
+
+    # All metrics to plot
+    metrics = [
+        ('pd_bridging', pd_bridging, 'PD Bridging'),
+        ('pnorm_min', pnorm_min, 'p-norm (p=-10)'),
+        ('pnorm_geo', pnorm_geo, 'p-norm (p=0)'),
+        ('harmonic_pd', harmonic_pd, 'Harmonic PD'),
+        ('polis', polis_scores, 'Polis'),
+    ]
 
     # Generate item names if not provided
     if item_names is None:
-        item_names = [f'Item {i+1}' for i in range(n_items)]
+        item_names_list = [f'Item {i+1}' for i in range(n_items)]
+    else:
+        item_names_list = item_names[:n_items]
 
-    # Limit to top N items if specified
-    if max_items is not None and n_items > max_items:
-        # Get indices of top items by bridging score
-        top_indices = np.argsort(bridging_scores)[::-1][:max_items]
-        matrix = matrix[top_indices]
-        bridging_scores = bridging_scores[top_indices]
-        item_names = [item_names[i] for i in top_indices]
-        n_items = max_items
-        print(f"    (showing top {max_items} items by bridging score)")
+    # Generate plots for each metric
+    for metric_key, scores, metric_label in metrics:
+        if np.isnan(scores).all():
+            continue
 
-    # Adjust figure height based on number of items
-    fig_height = max(8, n_items * 0.6)
+        # Create metric subdirectory
+        metric_dir = output_dir / metric_key
+        metric_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate plot
-    title = f'{dataset_name}: {file_id}'
-    output_path = output_dir / f'{file_id}.png'
-    plot_voter_spectrum(
-        matrix,
-        pc1_scores,
-        bridging_scores,
-        item_names,
-        title,
-        output_path,
-        fig_height=fig_height,
-    )
-    print(f"    Saved: {output_path}")
+        # Handle NaN scores by replacing with -inf for sorting
+        scores_for_sort = np.where(np.isnan(scores), -np.inf, scores)
+
+        # Limit to top N items if specified
+        if max_items is not None and n_items > max_items:
+            top_indices = np.argsort(scores_for_sort)[::-1][:max_items]
+            matrix_subset = matrix[top_indices]
+            scores_subset = scores[top_indices]
+            names_subset = [item_names_list[i] for i in top_indices]
+            n_display = max_items
+        else:
+            matrix_subset = matrix
+            scores_subset = scores
+            names_subset = item_names_list
+            n_display = n_items
+
+        # Adjust figure height
+        fig_height = max(8, n_display * 0.6)
+
+        # Generate plot
+        title = f'{dataset_name}: {file_id}'
+        output_path = metric_dir / f'{file_id}.png'
+        plot_voter_spectrum(
+            matrix_subset,
+            pc1_scores,
+            scores_subset,
+            names_subset,
+            title,
+            output_path,
+            fig_height=fig_height,
+            metric_name=metric_label,
+        )
+
+    print(f"    Saved plots for {len(metrics)} metrics")
 
 
 def main():
-    """Generate plots for all approval voting datasets."""
+    """Generate plots for all approval voting datasets (excluding Pol.is 00069)."""
     base_dir = Path(__file__).parent.parent
     output_dir = Path(__file__).parent / 'plots'
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -628,25 +679,11 @@ def main():
                 item_names=CANDIDATE_NAMES_2007,
             )
 
-    # Process Pol.is completed files (00069)
-    polis_dir = base_dir / 'data' / 'completed'
-    polis_files = sorted(glob(str(polis_dir / '00069-*.npz')))
-    if polis_files:
-        print(f"\nProcessing {len(polis_files)} Pol.is files...")
-        for filepath in polis_files:
-            process_dataset(
-                Path(filepath),
-                output_dir,
-                'Pol.is',
-                item_names=None,  # Will auto-generate
-                max_items=30,  # Show top 30 comments
-            )
-
     print(f"\nAll plots saved to: {output_dir}")
 
 
 def main_histogram():
-    """Generate histogram plots for all approval voting datasets."""
+    """Generate histogram plots for all approval voting datasets (excluding Pol.is 00069)."""
     base_dir = Path(__file__).parent.parent
     output_dir = Path(__file__).parent / 'plots_histogram'
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -703,20 +740,6 @@ def main_histogram():
                 output_dir,
                 'French Election 2007',
                 item_names=CANDIDATE_NAMES_2007,
-            )
-
-    # Process Pol.is completed files (00069)
-    polis_dir = base_dir / 'data' / 'completed'
-    polis_files = sorted(glob(str(polis_dir / '00069-*.npz')))
-    if polis_files:
-        print(f"\nProcessing {len(polis_files)} Pol.is files...")
-        for filepath in polis_files:
-            process_dataset_histogram(
-                Path(filepath),
-                output_dir,
-                'Pol.is',
-                item_names=None,
-                max_items=30,
             )
 
     print(f"\nAll plots saved to: {output_dir}")

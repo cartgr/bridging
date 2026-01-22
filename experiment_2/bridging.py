@@ -187,3 +187,143 @@ def compute_bridging_scores_from_disagreement(
         bridging_scores[c] = normalization * total
 
     return bridging_scores
+
+
+def compute_bridging_pnorm(matrix: np.ndarray, p: float = 2.0) -> np.ndarray:
+    """
+    Compute p-norm bridging score for each comment (vectorized).
+
+    b_p(c) = (1/|C-1|) × Σ_{c' ≠ c} (w_{c'} × a_1^p + (1-w_{c'}) × a_2^p)^(1/p)
+
+    Where:
+    - w_{c'} = proportion of all voters who approve c'
+    - a_1 = approval proportion of c among approvers of c'
+    - a_2 = approval proportion of c among disapprovers of c'
+
+    This measures how consistently c is approved across different "slices"
+    of the population defined by their opinion on other comments.
+
+    Args:
+        matrix: (n_items, n_voters) array with values 0.0 or 1.0
+        p: the p-norm parameter (default: 2.0)
+
+    Returns:
+        (n_items,) array of p-norm bridging scores
+    """
+    n_items, n_voters = matrix.shape
+
+    # Precompute approval counts for all items
+    # w[c'] = approval rate of c'
+    w = matrix.sum(axis=1) / n_voters  # (n_items,)
+
+    # Precompute: for each (c, c') pair, compute a_1 and a_2
+    # a_1[c, c'] = approval of c among approvers of c'
+    # a_2[c, c'] = approval of c among disapprovers of c'
+
+    # Number of approvers/disapprovers per item
+    n_approvers = matrix.sum(axis=1)  # (n_items,)
+    n_disapprovers = n_voters - n_approvers
+
+    # matrix[c] @ matrix[c'].T = number who approve both c and c'
+    # This gives us a (n_items, n_items) matrix
+    both_approve = matrix @ matrix.T  # (n_items, n_items)
+
+    # a_1[c, c'] = both_approve[c, c'] / n_approvers[c']
+    # Handle division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_1 = both_approve / n_approvers[np.newaxis, :]  # (n_items, n_items)
+        a_1 = np.nan_to_num(a_1, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Approvers of c who disapprove c' = approvers of c - both_approve
+    approve_c_only = matrix.sum(axis=1)[:, np.newaxis] - both_approve
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_2 = approve_c_only / n_disapprovers[np.newaxis, :]
+        a_2 = np.nan_to_num(a_2, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Now compute p-norm terms for all (c, c') pairs
+    w_row = w[np.newaxis, :]  # (1, n_items) for broadcasting
+
+    if p == float('inf'):
+        terms = np.maximum(a_1, a_2)
+    elif p == float('-inf'):
+        terms = np.minimum(a_1, a_2)
+    elif p == 0:
+        # Geometric mean: a_1^w × a_2^(1-w)
+        # Handle zeros
+        with np.errstate(divide='ignore', invalid='ignore'):
+            terms = np.where(
+                (a_1 > 0) & (a_2 > 0),
+                np.power(a_1, w_row) * np.power(a_2, 1 - w_row),
+                0.0
+            )
+    elif p < 0:
+        # For negative p, zeros cause issues
+        with np.errstate(divide='ignore', invalid='ignore'):
+            terms = np.where(
+                (a_1 > 0) & (a_2 > 0),
+                np.power(w_row * np.power(a_1, p) + (1 - w_row) * np.power(a_2, p), 1/p),
+                0.0
+            )
+    else:
+        terms = np.power(w_row * np.power(a_1, p) + (1 - w_row) * np.power(a_2, p), 1/p)
+
+    # Zero out diagonal (c' = c)
+    np.fill_diagonal(terms, 0.0)
+
+    # Average over all other comments
+    scores = terms.sum(axis=1) / (n_items - 1) if n_items > 1 else np.zeros(n_items)
+
+    return scores
+
+
+def compute_bridging_harmonic_pd(matrix: np.ndarray) -> np.ndarray:
+    """
+    Compute Harmonic Pairwise Disagreement bridging score.
+
+    b(a_1, a_2; w) = 2w(1-w)a_1*a_2 / (w*a_1 + (1-w)*a_2)
+
+    This is the harmonic mean of (w*a_1) and ((1-w)*a_2), normalized by approval.
+
+    Args:
+        matrix: (n_items, n_voters) array with values 0.0 or 1.0
+
+    Returns:
+        (n_items,) array of harmonic PD bridging scores
+    """
+    n_items, n_voters = matrix.shape
+
+    # w[c'] = approval rate of c'
+    w = matrix.sum(axis=1) / n_voters  # (n_items,)
+
+    # Precompute overlap counts
+    both_approve = matrix @ matrix.T  # (n_items, n_items)
+    n_approvers = matrix.sum(axis=1)  # (n_items,)
+    n_disapprovers = n_voters - n_approvers
+
+    # a_1[c, c'] = approval of c among approvers of c'
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_1 = both_approve / n_approvers[np.newaxis, :]
+        a_1 = np.nan_to_num(a_1, nan=0.0)
+
+    # a_2[c, c'] = approval of c among disapprovers of c'
+    approve_c_only = matrix.sum(axis=1)[:, np.newaxis] - both_approve
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_2 = approve_c_only / n_disapprovers[np.newaxis, :]
+        a_2 = np.nan_to_num(a_2, nan=0.0)
+
+    w_row = w[np.newaxis, :]  # (1, n_items)
+
+    # Harmonic PD: 2w(1-w)a_1*a_2 / (w*a_1 + (1-w)*a_2)
+    numerator = 2 * w_row * (1 - w_row) * a_1 * a_2
+    denominator = w_row * a_1 + (1 - w_row) * a_2
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        terms = np.where(denominator > 0, numerator / denominator, 0.0)
+
+    # Zero out diagonal
+    np.fill_diagonal(terms, 0.0)
+
+    # Average over all other comments
+    scores = terms.sum(axis=1) / (n_items - 1) if n_items > 1 else np.zeros(n_items)
+
+    return scores

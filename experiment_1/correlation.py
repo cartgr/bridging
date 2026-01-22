@@ -9,9 +9,14 @@ import numpy as np
 from pathlib import Path
 from glob import glob
 from scipy.stats import pearsonr, spearmanr
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_2.bridging import (
+    compute_bridging_scores_vectorized,
+    compute_bridging_pnorm,
+    compute_bridging_harmonic_pd,
+)
 from experiment_5.polis import polis_consensus_pipeline
 
 
@@ -68,8 +73,22 @@ def compute_all_correlations(files):
     pd_pearson, pd_spearman = [], []
     # PD bridging vs Polis
     bp_pearson, bp_spearman = [], []
+    # p-norm bridging (p=-10, approx min) vs approval
+    pn_min_a_pearson, pn_min_a_spearman = [], []
+    # p-norm bridging (p=-10) vs diversity
+    pn_min_d_pearson, pn_min_d_spearman = [], []
+    # p-norm bridging (p=0, geometric mean) vs approval
+    pn_geo_a_pearson, pn_geo_a_spearman = [], []
+    # p-norm bridging (p=0) vs diversity
+    pn_geo_d_pearson, pn_geo_d_spearman = [], []
+    # p-norm bridging (p=1, approval) vs approval
+    pn_avg_a_pearson, pn_avg_a_spearman = [], []
+    # Harmonic PD vs approval
+    hpd_a_pearson, hpd_a_spearman = [], []
+    # Harmonic PD vs diversity
+    hpd_d_pearson, hpd_d_spearman = [], []
 
-    for f in files:
+    for f in tqdm(files, desc="Processing files", leave=False):
         matrix = load_matrix(f)
 
         # Skip files with NaN for Polis (needs complete or imputable data)
@@ -85,6 +104,14 @@ def compute_all_correlations(files):
         rates = compute_approval_rates(matrix_filled)
         diversity = compute_approver_diversity(matrix_filled)
         bridging = compute_bridging_scores_vectorized(matrix_filled)
+
+        # Compute p-norm bridging scores
+        pnorm_min = compute_bridging_pnorm(matrix_filled, p=-10)  # approx min
+        pnorm_geo = compute_bridging_pnorm(matrix_filled, p=0)    # geometric mean
+        pnorm_avg = compute_bridging_pnorm(matrix_filled, p=1)    # arithmetic mean (= approval)
+
+        # Compute harmonic PD
+        harmonic_pd = compute_bridging_harmonic_pd(matrix_filled)
 
         # Compute Polis consensus scores
         try:
@@ -132,6 +159,48 @@ def compute_all_correlations(files):
         bp_pearson.append(r_p)
         bp_spearman.append(r_s)
 
+        # p-norm (p=-10, min) vs Approval
+        r_p, _ = pearsonr(pnorm_min[valid], rates[valid])
+        r_s, _ = spearmanr(pnorm_min[valid], rates[valid])
+        pn_min_a_pearson.append(r_p)
+        pn_min_a_spearman.append(r_s)
+
+        # p-norm (p=-10, min) vs Diversity
+        r_p, _ = pearsonr(pnorm_min[valid], diversity[valid])
+        r_s, _ = spearmanr(pnorm_min[valid], diversity[valid])
+        pn_min_d_pearson.append(r_p)
+        pn_min_d_spearman.append(r_s)
+
+        # p-norm (p=0, geo) vs Approval
+        r_p, _ = pearsonr(pnorm_geo[valid], rates[valid])
+        r_s, _ = spearmanr(pnorm_geo[valid], rates[valid])
+        pn_geo_a_pearson.append(r_p)
+        pn_geo_a_spearman.append(r_s)
+
+        # p-norm (p=0, geo) vs Diversity
+        r_p, _ = pearsonr(pnorm_geo[valid], diversity[valid])
+        r_s, _ = spearmanr(pnorm_geo[valid], diversity[valid])
+        pn_geo_d_pearson.append(r_p)
+        pn_geo_d_spearman.append(r_s)
+
+        # p-norm (p=1, avg) vs Approval (should be ~1.0)
+        r_p, _ = pearsonr(pnorm_avg[valid], rates[valid])
+        r_s, _ = spearmanr(pnorm_avg[valid], rates[valid])
+        pn_avg_a_pearson.append(r_p)
+        pn_avg_a_spearman.append(r_s)
+
+        # Harmonic PD vs Approval
+        r_p, _ = pearsonr(harmonic_pd[valid], rates[valid])
+        r_s, _ = spearmanr(harmonic_pd[valid], rates[valid])
+        hpd_a_pearson.append(r_p)
+        hpd_a_spearman.append(r_s)
+
+        # Harmonic PD vs Diversity
+        r_p, _ = pearsonr(harmonic_pd[valid], diversity[valid])
+        r_s, _ = spearmanr(harmonic_pd[valid], diversity[valid])
+        hpd_d_pearson.append(r_p)
+        hpd_d_spearman.append(r_s)
+
     return {
         'approval_diversity': (ad_pearson, ad_spearman),
         'bridging_approval': (ba_pearson, ba_spearman),
@@ -139,6 +208,13 @@ def compute_all_correlations(files):
         'polis_approval': (pa_pearson, pa_spearman),
         'polis_diversity': (pd_pearson, pd_spearman),
         'bridging_polis': (bp_pearson, bp_spearman),
+        'pnorm_min_approval': (pn_min_a_pearson, pn_min_a_spearman),
+        'pnorm_min_diversity': (pn_min_d_pearson, pn_min_d_spearman),
+        'pnorm_geo_approval': (pn_geo_a_pearson, pn_geo_a_spearman),
+        'pnorm_geo_diversity': (pn_geo_d_pearson, pn_geo_d_spearman),
+        'pnorm_avg_approval': (pn_avg_a_pearson, pn_avg_a_spearman),
+        'harmonic_pd_approval': (hpd_a_pearson, hpd_a_spearman),
+        'harmonic_pd_diversity': (hpd_d_pearson, hpd_d_spearman),
         'n': len(ad_pearson),
     }
 
@@ -156,6 +232,13 @@ def print_results(name, results):
         ('polis_approval', 'Polis vs Approval'),
         ('polis_diversity', 'Polis vs Diversity'),
         ('bridging_polis', 'PD Bridging vs Polis'),
+        ('pnorm_min_approval', 'p-norm (p=-10, min) vs Approval'),
+        ('pnorm_min_diversity', 'p-norm (p=-10, min) vs Diversity'),
+        ('pnorm_geo_approval', 'p-norm (p=0, geo) vs Approval'),
+        ('pnorm_geo_diversity', 'p-norm (p=0, geo) vs Diversity'),
+        ('pnorm_avg_approval', 'p-norm (p=1, avg) vs Approval'),
+        ('harmonic_pd_approval', 'Harmonic PD vs Approval'),
+        ('harmonic_pd_diversity', 'Harmonic PD vs Diversity'),
     ]
 
     for key, label in labels:
@@ -172,13 +255,12 @@ def print_results(name, results):
 def main():
     base_dir = Path(__file__).parent.parent
 
-    # Define all data sources
+    # Define all data sources (excluding Pol.is - uses imputed data)
     datasets = [
         ('French Election 2002 (00026)', 'data/processed/preflib/00026-*.npz'),
         ('San Sebastian Poster (00033)', 'data/processed/preflib/00033-*.npz'),
         ('CTU Tutorial (00063)', 'data/processed/preflib/00063-*.npz'),
         ('French Election 2007 (00071)', 'data/processed/preflib/00071-*.npz'),
-        ('Pol.is (00069)', 'data/completed/00069-*.npz'),
     ]
 
     print("=" * 55)
@@ -186,7 +268,7 @@ def main():
     print("=" * 55)
     print()
 
-    for name, pattern in datasets:
+    for name, pattern in tqdm(datasets, desc="Datasets"):
         files = sorted(glob(str(base_dir / pattern)))
         if not files:
             print(f"{name}: No files found")
