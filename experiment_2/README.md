@@ -2,7 +2,6 @@
 
 > **TODO:**
 > - [ ] Do a full run of the experiment
-> - [ ] Change exact inclusion probability computation to Monte Carlo
 
 Tests whether IPW can accurately estimate bridging scores from partially observed Pol.is data.
 
@@ -23,7 +22,7 @@ Results in `results/*.json` with metrics: Spearman, Kendall, RMSE, top-k precisi
 ## Method
 
 1. Simulate Pol.is routing on complete (ground truth) data
-2. Track exact inclusion probabilities for each voter-comment pair
+2. Estimate inclusion probabilities for each voter-comment pair (Monte Carlo)
 3. Estimate bridging scores using IPW correction
 4. Compare to ground truth
 
@@ -58,13 +57,7 @@ Implemented in [`priority.py:compute_pca_extremeness()`](priority.py), based on 
 
 ### Inclusion Probability Computation
 
-Implemented in [`simulation.py`](simulation.py). For PPS sampling without replacement:
-
-```
-π_c(S, k) = p_c(S) + Σⱼ p_j(S) × π_c(S\{j}, k-1)
-```
-
-Exact computation when feasible (≤500k states), Monte Carlo fallback otherwise.
+Implemented in [`priority.py`](priority.py). For PPS sampling without replacement, inclusion probabilities are estimated via Monte Carlo simulation (2000 samples by default).
 
 ### IPW Estimator
 

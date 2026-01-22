@@ -456,19 +456,20 @@ def _compute_inclusion_monte_carlo(
     return inclusion_counts / n_samples
 
 
-def compute_inclusion_probability_exact(
-    priorities: np.ndarray, eligible_mask: np.ndarray, k_votes: int
+def compute_inclusion_probability(
+    priorities: np.ndarray,
+    eligible_mask: np.ndarray,
+    k_votes: int,
+    n_samples: int = 2000,
 ) -> np.ndarray:
     """
-    Compute exact inclusion probability for PPS sampling without replacement.
-
-    For small problems (n_eligible <= 20 and k_votes <= 10), uses exact recursive
-    computation. For larger problems, falls back to Monte Carlo estimation.
+    Estimate inclusion probability for PPS sampling without replacement via Monte Carlo.
 
     Args:
         priorities: (n_items,) array of priority values (frozen)
         eligible_mask: (n_items,) boolean array, True for eligible comments
         k_votes: number of votes to draw
+        n_samples: number of Monte Carlo samples
 
     Returns:
         (n_items,) array of inclusion probabilities
@@ -486,18 +487,10 @@ def compute_inclusion_probability_exact(
     if k_votes >= n_eligible:
         return eligible_mask.astype(float)
 
-    # Estimate state space size: Σ_{j=0}^{k} C(n, j)
-    # Use threshold to decide exact vs Monte Carlo
-    # For n=20, k=10: ~180k states (fast)
-    # For n=30, k=10: ~30M states (slow)
-    from math import comb
-    estimated_states = sum(comb(n_eligible, j) for j in range(min(k_votes, n_eligible) + 1))
+    return _compute_inclusion_monte_carlo(
+        priorities, eligible_indices, k_votes, n_samples=n_samples
+    )
 
-    if estimated_states <= 500_000:
-        # Use exact recursive computation
-        return _compute_inclusion_exact_recursive(priorities, eligible_indices, k_votes)
-    else:
-        # Fall back to Monte Carlo
-        return _compute_inclusion_monte_carlo(
-            priorities, eligible_indices, k_votes, n_samples=2000
-        )
+
+# Keep old name as alias for backwards compatibility
+compute_inclusion_probability_exact = compute_inclusion_probability
