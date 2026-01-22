@@ -10,20 +10,28 @@ python experiment_1/analyze.py
 
 ## Output
 
-Scatter plots in `plots/hamming_distance/`:
-- X-axis: Approver diversity (mean pairwise Hamming distance)
-- Y-axis: Approval rate
+Three types of plots in `plots/`:
 
-High diversity + high approval suggests bridging items.
+| Directory | Description |
+|-----------|-------------|
+| `plain/` | Basic scatter plot of approval vs diversity |
+| `colored/` | Same scatter, colored by PD bridging score (viridis) |
+| `comparison/` | Highlights top comment from PD vs Polis methods |
 
-## Method
+## Metrics
 
 **Approver Diversity:** Average pairwise Hamming distance between complete voting profiles of all approvers.
+```
+Diversity(c) = Σ_{i<j ∈ N_c} d_ij / [k_c(k_c-1)/2]
+```
+Uses O(m) closed-form computation instead of O(n²) pairwise.
 
-Uses O(m) closed-form computation instead of O(n²) pairwise:
+**PD Bridging Score:** Total pairwise disagreement among approvers, normalized by total voters.
 ```
-Mean Hamming = Σⱼ[kⱼ(n-kⱼ)] / [n(n-1)/2 × m]
+b^PD(c) = (4/n²) × Σ_{i<j ∈ N_c} d_ij
 ```
+
+**Key difference:** Diversity normalizes by approver pairs; bridging normalizes by total voters². This means bridging score scales with both diversity AND approval rate.
 
 ## Data
 

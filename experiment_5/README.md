@@ -3,6 +3,7 @@
 > **TODO:**
 > - [ ] Do a full run of the simulation experiment (all 6 datasets, 30+ trials)
 > - [ ] Add variance analysis (estimate variance across trials for each method)
+> - [ ] Measure ranking stability (how often does the top-k ranking change across trials?)
 
 Compares robustness of bridging scores vs Pol.is Group-Informed Consensus under missing data.
 

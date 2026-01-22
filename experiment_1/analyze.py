@@ -4,15 +4,30 @@ Experiment 1: Approval Rate vs. Approver Diversity
 Plot each comment/item by its approval rate (x-axis) and the diversity of
 its approvers (y-axis). Diversity is measured by average pairwise Hamming
 distance between approvers' voting vectors.
+
+Two versions:
+1. Plain scatter plot
+2. Scatter plot colored by PD bridging score (viridis colormap)
+
+Also shows which comment each method (PD vs Polis) ranks as most bridging.
 """
 
+import sys
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
 from pathlib import Path
 from glob import glob
 from tqdm import tqdm
+
+# Add parent for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_5.polis import polis_consensus_pipeline
 
 
 def compute_approval_rates(matrix: np.ndarray) -> np.ndarray:
@@ -49,7 +64,6 @@ def compute_approver_diversity(matrix: np.ndarray, metric: str = 'hamming') -> n
     n_items = matrix.shape[0]
     diversity = np.zeros(n_items)
 
-    # Use tqdm for large matrices
     iterator = range(n_items)
     if n_items > 100:
         iterator = tqdm(iterator, desc="Computing diversity", leave=False)
@@ -88,12 +102,6 @@ def plot_approval_vs_diversity(
 ) -> None:
     """
     Create scatter plot of approval rate vs approver diversity.
-
-    Args:
-        rates: Approval rates for each item
-        diversity: Diversity scores for each item
-        title: Plot title
-        output_path: Path to save the plot
     """
     fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -111,10 +119,8 @@ def plot_approval_vs_diversity(
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
 
-    # Add grid
     ax.grid(True, alpha=0.3)
 
-    # Add stats annotation
     n_valid = len(valid_rates)
     n_total = len(rates)
     stats_text = f'n={n_valid} items'
@@ -128,10 +134,141 @@ def plot_approval_vs_diversity(
     plt.close()
 
 
+def plot_approval_vs_diversity_colored(
+    rates: np.ndarray,
+    diversity: np.ndarray,
+    bridging_scores: np.ndarray,
+    title: str,
+    output_path: Path,
+) -> None:
+    """
+    Create scatter plot colored by PD bridging score.
+    """
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    # Filter out NaN values
+    valid_mask = ~np.isnan(diversity)
+    valid_rates = rates[valid_mask]
+    valid_diversity = diversity[valid_mask]
+    valid_bridging = bridging_scores[valid_mask]
+
+    # Color by bridging score using viridis
+    norm = Normalize(vmin=valid_bridging.min(), vmax=valid_bridging.max())
+    scatter = ax.scatter(
+        valid_diversity, valid_rates,
+        c=valid_bridging, cmap='viridis',
+        alpha=0.7, edgecolors='none', s=60,
+        norm=norm
+    )
+
+    # Colorbar
+    cbar = fig.colorbar(scatter, ax=ax, shrink=0.8)
+    cbar.set_label('PD Bridging Score', fontsize=10)
+
+    ax.set_xlabel('Approver Diversity (Hamming Distance)', fontsize=12)
+    ax.set_ylabel('Approval Rate', fontsize=12)
+    ax.set_title(f'{title}\n(colored by PD bridging score)', fontsize=12)
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3)
+
+    n_valid = len(valid_rates)
+    ax.annotate(f'n={n_valid} items', xy=(0.02, 0.98), xycoords='axes fraction',
+                fontsize=9, verticalalignment='top')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_top_comments_comparison(
+    rates: np.ndarray,
+    diversity: np.ndarray,
+    bridging_scores: np.ndarray,
+    polis_scores: np.ndarray,
+    title: str,
+    output_path: Path,
+    item_names: list = None,
+) -> None:
+    """
+    Plot showing which comment each method ranks as most bridging.
+    """
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    # Filter out NaN values
+    valid_mask = ~np.isnan(diversity)
+    valid_indices = np.where(valid_mask)[0]
+    valid_rates = rates[valid_mask]
+    valid_diversity = diversity[valid_mask]
+    valid_bridging = bridging_scores[valid_mask]
+    valid_polis = polis_scores[valid_mask]
+
+    # Plot all points in grey
+    ax.scatter(valid_diversity, valid_rates, c='lightgrey', alpha=0.5,
+               edgecolors='none', s=40, label='All items')
+
+    # Find top-1 for each method (among valid items)
+    pd_top_valid_idx = np.argmax(valid_bridging)
+    polis_top_valid_idx = np.argmax(valid_polis)
+
+    # Map back to original indices
+    pd_top_idx = valid_indices[pd_top_valid_idx]
+    polis_top_idx = valid_indices[polis_top_valid_idx]
+
+    # Get names if available
+    if item_names:
+        pd_name = item_names[pd_top_idx]
+        polis_name = item_names[polis_top_idx]
+    else:
+        pd_name = f"Item {pd_top_idx}"
+        polis_name = f"Item {polis_top_idx}"
+
+    # Plot PD top (green/teal)
+    ax.scatter(
+        [diversity[pd_top_idx]], [rates[pd_top_idx]],
+        c='#1b9e77', s=200, marker='o', edgecolors='black', linewidths=2,
+        label=f'PD Top: {pd_name}', zorder=10
+    )
+
+    # Plot Polis top (purple)
+    ax.scatter(
+        [diversity[polis_top_idx]], [rates[polis_top_idx]],
+        c='#7570b3', s=200, marker='s', edgecolors='black', linewidths=2,
+        label=f'Polis Top: {polis_name}', zorder=10
+    )
+
+    # If same comment, add note
+    if pd_top_idx == polis_top_idx:
+        ax.annotate('(Same comment)', xy=(0.98, 0.02), xycoords='axes fraction',
+                    fontsize=10, ha='right', style='italic')
+
+    ax.set_xlabel('Approver Diversity (Hamming Distance)', fontsize=12)
+    ax.set_ylabel('Approval Rate', fontsize=12)
+    ax.set_title(f'{title}\nTop Bridging Comment: PD vs Polis', fontsize=12)
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper left', fontsize=9)
+
+    # Add stats
+    stats = (
+        f"PD top: approval={rates[pd_top_idx]:.2f}, diversity={diversity[pd_top_idx]:.2f}\n"
+        f"Polis top: approval={rates[polis_top_idx]:.2f}, diversity={diversity[polis_top_idx]:.2f}"
+    )
+    ax.annotate(stats, xy=(0.98, 0.98), xycoords='axes fraction',
+                fontsize=8, ha='right', va='top', family='monospace',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def load_matrix(filepath: Path) -> np.ndarray:
     """Load matrix from npz file."""
     data = np.load(filepath)
-    # Handle both 'matrix' and 'arr_0' keys
     if 'matrix' in data:
         return data['matrix']
     elif 'arr_0' in data:
@@ -140,11 +277,26 @@ def load_matrix(filepath: Path) -> np.ndarray:
         raise KeyError(f"No 'matrix' or 'arr_0' key in {filepath}")
 
 
+# French election candidate names
+CANDIDATE_NAMES = [
+    'Megret', 'Lepage', 'Gluckstein', 'Bayrou', 'Chirac',
+    'LePen', 'Taubira', 'Saint-Josse', 'Mamere', 'Jospin',
+    'Boutin', 'Hue', 'Chevenement', 'Madelin', 'Laguiller', 'Besancenot'
+]
+
+
 def main():
     """Process all datasets and generate plots."""
     base_dir = Path(__file__).parent.parent
-    output_dir = Path(__file__).parent / 'plots' / 'hamming_distance'
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(__file__).parent / 'plots'
+
+    # Create subdirectories
+    plain_dir = output_dir / 'plain'
+    colored_dir = output_dir / 'colored'
+    comparison_dir = output_dir / 'comparison'
+
+    for d in [plain_dir, colored_dir, comparison_dir]:
+        d.mkdir(parents=True, exist_ok=True)
 
     # Define data sources
     data_sources = [
@@ -159,21 +311,54 @@ def main():
         all_files.extend([(Path(f), dataset_name) for f in files])
 
     for filepath, dataset_name in tqdm(all_files, desc="Processing files"):
-        file_id = filepath.stem  # e.g., '00026-00000001'
+        file_id = filepath.stem
 
         # Load matrix
         matrix = load_matrix(filepath)
+        n_items, n_voters = matrix.shape
 
         # Compute metrics
         rates = compute_approval_rates(matrix)
         diversity = compute_approver_diversity(matrix)
 
-        # Generate plot
-        title = f'{dataset_name}: {file_id}'
-        output_path = output_dir / f'{file_id}.png'
-        plot_approval_vs_diversity(rates, diversity, title, output_path)
+        # Compute PD bridging scores
+        bridging_scores = compute_bridging_scores_vectorized(matrix)
 
-    print(f"\nAll plots saved to: {output_dir}")
+        # Compute Polis consensus scores
+        observed_mask = np.ones_like(matrix, dtype=bool)  # Fully observed
+        polis_scores, _ = polis_consensus_pipeline(matrix, observed_mask)
+
+        # Get item names
+        if '00026' in file_id:
+            item_names = CANDIDATE_NAMES[:n_items]
+        else:
+            item_names = [f'Item {i}' for i in range(n_items)]
+
+        title = f'{dataset_name}: {file_id}'
+
+        # Plot 1: Plain scatter
+        plot_approval_vs_diversity(
+            rates, diversity, title,
+            plain_dir / f'{file_id}.png'
+        )
+
+        # Plot 2: Colored by bridging score
+        plot_approval_vs_diversity_colored(
+            rates, diversity, bridging_scores, title,
+            colored_dir / f'{file_id}.png'
+        )
+
+        # Plot 3: Top comments comparison
+        plot_top_comments_comparison(
+            rates, diversity, bridging_scores, polis_scores, title,
+            comparison_dir / f'{file_id}.png',
+            item_names=item_names
+        )
+
+    print(f"\nPlots saved to:")
+    print(f"  Plain: {plain_dir}/")
+    print(f"  Colored by PD: {colored_dir}/")
+    print(f"  Method comparison: {comparison_dir}/")
 
 
 if __name__ == '__main__':
