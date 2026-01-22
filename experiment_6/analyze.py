@@ -9,13 +9,18 @@ Compares comment rankings between:
 Uses incomplete Pol.is datasets (00069) for realistic evaluation.
 """
 
+import csv
 import json
 import sys
+import textwrap
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 from scipy import stats
+from scipy.stats import gaussian_kde
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # Add parent for imports
@@ -176,6 +181,278 @@ def plot_ranking_comparison(
     plt.close()
 
 
+def save_rankings_csv(
+    matrix: np.ndarray,
+    observed_mask: np.ndarray,
+    rankings: dict,
+    comments: dict[int, str],
+    output_path: Path,
+    sort_by: str = "polis",
+):
+    """Save all comments with their ranks to CSV, sorted by rank."""
+    n_items = len(rankings["polis_ranks"])
+
+    # Build rows
+    rows = []
+    for idx in range(n_items):
+        # Compute approval rate
+        obs_votes = observed_mask[idx]
+        if obs_votes.sum() > 0:
+            approval_rate = (matrix[idx, obs_votes] == 1.0).sum() / obs_votes.sum()
+        else:
+            approval_rate = 0.0
+
+        rows.append({
+            "polis_rank": int(rankings["polis_ranks"][idx]),
+            "bridging_rank": int(rankings["bridging_ranks"][idx]),
+            "approval_rate": f"{approval_rate:.1%}",
+            "polis_score": rankings["polis_scores"][idx],
+            "bridging_score": rankings["bridging_scores"][idx],
+            "comment": comments.get(idx, f"[Comment #{idx}]"),
+        })
+
+    # Sort by specified rank (1 to n)
+    sort_key = "polis_rank" if sort_by == "polis" else "bridging_rank"
+    rows.sort(key=lambda r: r[sort_key])
+
+    # Write CSV
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["polis_rank", "bridging_rank", "approval_rate", "polis_score", "bridging_score", "comment"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def compute_voter_pca_scores(matrix: np.ndarray, observed_mask: np.ndarray) -> np.ndarray:
+    """Compute PC1 scores for voters using imputed matrix."""
+    # Impute missing values with column means
+    imputed = matrix.copy()
+    for c in range(matrix.shape[0]):
+        col_mask = observed_mask[c]
+        if col_mask.sum() > 0:
+            col_mean = matrix[c, col_mask].mean()
+            imputed[c, ~col_mask] = col_mean
+        else:
+            imputed[c, :] = 0
+
+    # PCA on voters
+    voter_matrix = imputed.T  # (n_voters, n_items)
+    centered = voter_matrix - np.nanmean(voter_matrix, axis=0)
+    centered = np.nan_to_num(centered, 0)
+    U, S, Vt = np.linalg.svd(centered, full_matrices=False)
+    return U[:, 0] * S[0]
+
+
+def wrap_comment(text: str, max_width: int = 60) -> list[str]:
+    """Wrap comment text into multiple lines."""
+    text = text.replace('\n', ' ').strip()
+    if not text:
+        return ["[No text]"]
+    return textwrap.wrap(text, width=max_width) or [text]
+
+
+def plot_ridgeline_rankings(
+    matrix: np.ndarray,
+    observed_mask: np.ndarray,
+    rankings: dict,
+    comments: dict[int, str],
+    output_path: Path,
+    title: str = "",
+    max_items: int = 30,
+    sort_by: str = "bridging",
+):
+    """
+    Create ridgeline visualization showing:
+    - Full comment text on left (wrapped)
+    - Voter approval distribution in middle
+    - Both Polis and Bridging ranks/scores on right
+
+    Sorted by bridging score by default.
+    """
+    n_items = matrix.shape[0]
+
+    # Get PC1 scores for voters
+    pc1_scores = compute_voter_pca_scores(matrix, observed_mask)
+
+    # Sort by specified ranking
+    if sort_by == "polis":
+        sorted_indices = np.argsort(rankings["polis_ranks"])
+    else:
+        sorted_indices = np.argsort(rankings["bridging_ranks"])
+
+    # Limit to top N
+    if n_items > max_items:
+        sorted_indices = sorted_indices[:max_items]
+
+    n_display = len(sorted_indices)
+
+    # Set up x grid for density
+    pc1_min, pc1_max = pc1_scores.min(), pc1_scores.max()
+    x_margin = (pc1_max - pc1_min) * 0.1
+    x_grid = np.linspace(pc1_min - x_margin, pc1_max + x_margin, 100)
+
+    # Compute densities and wrapped comments for displayed items
+    densities = []
+    wrapped_comments = []
+    for idx in sorted_indices:
+        # Get voters who approved this item
+        approvers = (matrix[idx] == 1.0) & observed_mask[idx]
+        x_approvers = pc1_scores[approvers]
+        if len(x_approvers) >= 2:
+            kde = gaussian_kde(x_approvers, bw_method=0.3)
+            density = kde(x_grid) * len(x_approvers)
+        else:
+            density = np.zeros_like(x_grid)
+        densities.append(density)
+        wrapped_comments.append(wrap_comment(comments.get(idx, f"[#{idx}]"), max_width=55))
+
+    # Calculate row heights based on number of comment lines
+    line_height = 0.18  # Height per line of text
+    min_row_height = 1.0
+    row_heights = [max(min_row_height, len(wc) * line_height + 0.3) for wc in wrapped_comments]
+
+    # Scale factor for density (relative to minimum row height)
+    max_density = max(d.max() for d in densities) if densities else 1.0
+    scale_factor = (min_row_height * 0.75) / max_density if max_density > 0 else 1.0
+
+    # Calculate cumulative y positions (bottom to top)
+    y_positions = []
+    y_current = 0
+    for i in range(n_display - 1, -1, -1):
+        y_positions.insert(0, y_current)
+        y_current += row_heights[i]
+    total_height = y_current
+
+    # Create figure
+    fig_height = max(10, total_height * 0.6)
+    fig, ax = plt.subplots(figsize=(18, fig_height))
+
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+
+    # Colormap for gradient fill
+    cmap = plt.cm.coolwarm
+    from matplotlib.colors import Normalize
+    norm = Normalize(vmin=pc1_min, vmax=pc1_max)
+
+    # Plot each item
+    for row_idx, item_idx in enumerate(sorted_indices):
+        y_base = y_positions[row_idx]
+        density = densities[row_idx] * scale_factor
+        row_height = row_heights[row_idx]
+
+        # Draw filled density with gradient
+        for i in range(len(x_grid) - 1):
+            x_left, x_right = x_grid[i], x_grid[i + 1]
+            y_left, y_right = density[i], density[i + 1]
+            if y_left < 0.001 and y_right < 0.001:
+                continue
+            x_mid = (x_left + x_right) / 2
+            color = cmap(norm(x_mid))
+            verts = [
+                (x_left, y_base),
+                (x_left, y_base + y_left),
+                (x_right, y_base + y_right),
+                (x_right, y_base),
+            ]
+            poly = plt.Polygon(verts, facecolor=color, edgecolor='none', alpha=0.7)
+            ax.add_patch(poly)
+
+        # Outline
+        ax.plot(x_grid, y_base + density, color='black', linewidth=0.5, alpha=0.5)
+
+        # Baseline
+        ax.axhline(y=y_base, color='grey', linewidth=0.3, alpha=0.3)
+
+        # Compute approval rate for this item
+        obs_votes = observed_mask[item_idx]
+        if obs_votes.sum() > 0:
+            approval_rate = (matrix[item_idx, obs_votes] == 1.0).sum() / obs_votes.sum()
+        else:
+            approval_rate = 0.0
+
+        # Comment text on left (wrapped, multiple lines)
+        comment_lines = wrapped_comments[row_idx]
+        y_text_center = y_base + row_height * 0.5
+        y_text_start = y_text_center + (len(comment_lines) - 1) * line_height / 2
+        for line_idx, line in enumerate(comment_lines):
+            ax.text(
+                pc1_min - x_margin - 0.3, y_text_start - line_idx * line_height,
+                line,
+                fontsize=7,
+                ha='right',
+                va='center',
+                family='sans-serif',
+            )
+
+        # Metrics on right side (vertically centered)
+        y_metrics = y_base + row_height * 0.4
+
+        # Approval rate
+        ax.text(
+            pc1_max + x_margin + 0.2, y_metrics,
+            f'{approval_rate:.0%}',
+            fontsize=8,
+            ha='left',
+            va='center',
+            family='monospace',
+        )
+
+        # Polis rank and score
+        polis_rank = int(rankings["polis_ranks"][item_idx])
+        polis_score = rankings["polis_scores"][item_idx]
+        ax.text(
+            pc1_max + x_margin + 1.0, y_metrics,
+            f'{polis_rank:3d}  {polis_score:.3f}',
+            fontsize=8,
+            ha='left',
+            va='center',
+            family='monospace',
+        )
+
+        # Bridging rank and score
+        bridging_rank = int(rankings["bridging_ranks"][item_idx])
+        bridging_score = rankings["bridging_scores"][item_idx]
+        ax.text(
+            pc1_max + x_margin + 2.8, y_metrics,
+            f'{bridging_rank:3d}  {bridging_score:.3f}',
+            fontsize=8,
+            ha='left',
+            va='center',
+            family='monospace',
+        )
+
+    # Format axes
+    ax.set_xlim(pc1_min - x_margin - 7.0, pc1_max + x_margin + 5.5)
+    ax.set_ylim(-0.5, total_height + 0.5)
+    ax.set_yticks([])
+    ax.set_xlabel('PC1 Score (Voter Spectrum)', fontsize=10)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+
+    # Column headers
+    ax.text(pc1_min - x_margin - 3.5, total_height + 0.3, 'Comment',
+            fontsize=10, fontweight='bold', ha='center')
+    ax.text((pc1_min + pc1_max) / 2, total_height + 0.3, 'Approval Distribution',
+            fontsize=10, fontweight='bold', ha='center')
+    ax.text(pc1_max + x_margin + 0.4, total_height + 0.3, 'Appr',
+            fontsize=10, fontweight='bold', ha='center')
+    ax.text(pc1_max + x_margin + 1.6, total_height + 0.3, 'Polis',
+            fontsize=10, fontweight='bold', ha='center')
+    ax.text(pc1_max + x_margin + 3.4, total_height + 0.3, 'Bridging',
+            fontsize=10, fontweight='bold', ha='center')
+
+    # Sub-headers for rank/score
+    ax.text(pc1_max + x_margin + 1.0, total_height + 0.0, 'Rank  Score',
+            fontsize=7, ha='left', color='grey', family='monospace')
+    ax.text(pc1_max + x_margin + 2.8, total_height + 0.0, 'Rank  Score',
+            fontsize=7, ha='left', color='grey', family='monospace')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def plot_top_comments_comparison(
     all_results: list[dict],
     output_path: Path,
@@ -284,6 +561,21 @@ def run_experiment():
             comparison,
             plots_dir / f"{ds['name']}.png",
             title=f"{ds['name']} (obs rate: {ds['observation_rate']:.1%})"
+        )
+
+        # Save CSV with rankings
+        save_rankings_csv(ds["matrix"], ds["observed_mask"], rankings, comments, results_dir / f"{ds['name']}_rankings.csv")
+
+        # Ridgeline visualization (sorted by bridging score)
+        plot_ridgeline_rankings(
+            ds["matrix"],
+            ds["observed_mask"],
+            rankings,
+            comments,
+            plots_dir / f"{ds['name']}_ridgeline.png",
+            title=f"{ds['name']} - Top Comments by Bridging Score",
+            max_items=30,
+            sort_by="bridging",
         )
 
         all_results.append({

@@ -13,9 +13,11 @@ python experiment_6/analyze.py
 
 ## Output
 
-- Per-dataset plots: `plots/{dataset}.png`
-- Summary plot: `plots/summary.png`
-- Results: `results/ranking_comparison_*.json`
+- **Ridgeline plots**: `plots/{dataset}_ridgeline.png` - Comments sorted by bridging score with voter approval distribution
+- **Scatter plots**: `plots/{dataset}.png` - Score/rank comparison between methods
+- **Summary plot**: `plots/summary.png` - Aggregate statistics across datasets
+- **Rankings CSV**: `results/{dataset}_rankings.csv` - All comments with both rankings and approval rates
+- **Results JSON**: `results/ranking_comparison_*.json`
 
 ## Methods Compared
 
@@ -30,12 +32,18 @@ python experiment_6/analyze.py
 - **Top-k overlap** (do methods agree on top comments?)
 - **Same top-1** (do they pick the same best comment?)
 
+## Results
+
+- 16 datasets analyzed
+- Mean Spearman ρ: 0.439 ± 0.159
+- Same top-1 comment: 1/16 (6%)
+
 ## Data
 
-Incomplete Pol.is datasets (00069): `data/processed/preflib/00069-*.npz`
+- Vote matrices: `data/processed/preflib/00069-*.npz`
+- Comment text: `data/polis_comments/*.csv` (from [compdemocracy/openData](https://github.com/compdemocracy/openData))
+- Dataset mapping: `data/polis_comments/dataset_mapping.json`
 
 ## Limitation
 
 **No IPW correction.** On real Pol.is data, we don't have access to the true inclusion probabilities needed for IPW. We use naive estimation for both methods, which may be biased by informative missingness. This is a fair comparison (same conditions for both methods) but neither estimate is necessarily unbiased.
-
-Estimating inclusion probabilities from observation rates (π_c ≈ shown_count / total_voters) is possible but makes strong assumptions about stationarity that may not hold.

@@ -25,6 +25,61 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from experiment_2.priority import power_iteration_pca
 
 
+def filter_participants_by_votes(
+    matrix: np.ndarray,
+    observed_mask: np.ndarray,
+    min_votes: int = 7,
+    min_participants: int = 15,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Filter participants based on vote count, matching Polis behavior.
+
+    Polis requires participants to have voted on at least min(7, n_comments) comments.
+    If fewer than 15 participants meet this criterion, greedily add top contributors.
+
+    Args:
+        matrix: (n_items, n_voters) array with vote values
+        observed_mask: (n_items, n_voters) boolean array
+        min_votes: minimum votes required (default: 7, matching Polis)
+        min_participants: minimum participants to keep (default: 15)
+
+    Returns:
+        Tuple of:
+        - filtered_matrix: (n_items, n_kept_voters) array
+        - filtered_mask: (n_items, n_kept_voters) boolean array
+        - kept_indices: (n_kept_voters,) indices of kept voters in original
+    """
+    n_items, n_voters = matrix.shape
+
+    # Count votes per participant
+    votes_per_participant = observed_mask.sum(axis=0)  # (n_voters,)
+
+    # Threshold: min(min_votes, n_items) - if few comments, require all
+    threshold = min(min_votes, n_items)
+
+    # Find participants meeting threshold
+    meets_threshold = votes_per_participant >= threshold
+    n_meeting = meets_threshold.sum()
+
+    if n_meeting >= min_participants:
+        # Enough participants meet threshold
+        kept_indices = np.where(meets_threshold)[0]
+    else:
+        # Not enough - greedily add top contributors
+        # Sort by vote count descending
+        sorted_indices = np.argsort(-votes_per_participant)
+
+        # Take top min_participants (or all if fewer voters)
+        n_to_keep = min(min_participants, n_voters)
+        kept_indices = sorted_indices[:n_to_keep]
+
+    # Filter matrix and mask
+    filtered_matrix = matrix[:, kept_indices]
+    filtered_mask = observed_mask[:, kept_indices]
+
+    return filtered_matrix, filtered_mask, kept_indices
+
+
 def impute_column_mean(
     matrix: np.ndarray,
     observed_mask: np.ndarray,
@@ -252,11 +307,15 @@ def polis_consensus_pipeline(
     n_pca_components: int = 2,
     max_k: int = 5,
     seed: int = 42,
+    filter_participants: bool = True,
+    min_votes: int = 7,
+    min_participants: int = 15,
 ) -> Tuple[np.ndarray, Dict]:
     """
     Full Polis Group-Informed Consensus pipeline.
 
     Pipeline steps:
+    0. (Optional) Filter participants by vote count (matching Polis production)
     1. Impute missing values with per-comment mean
     2. Compute voter PCA projections
     3. Cluster voters using k-means with silhouette selection
@@ -268,16 +327,31 @@ def polis_consensus_pipeline(
         n_pca_components: number of PCA components (default: 2)
         max_k: maximum clusters to try (default: 5)
         seed: random seed for reproducibility
+        filter_participants: whether to filter low-activity participants (default: True)
+        min_votes: minimum votes for participant inclusion (default: 7)
+        min_participants: minimum participants to keep (default: 15)
 
     Returns:
         Tuple of:
         - consensus_scores: (n_items,) array of scores in [0, 1]
         - metadata: dict with pipeline details (k, n_groups, etc.)
     """
-    n_items, n_voters = matrix.shape
+    n_items, n_voters_original = matrix.shape
+
+    # Step 0: Filter participants (matching Polis production behavior)
+    if filter_participants:
+        filtered_matrix, filtered_mask, kept_indices = filter_participants_by_votes(
+            matrix, observed_mask, min_votes=min_votes, min_participants=min_participants
+        )
+        n_voters_filtered = filtered_matrix.shape[1]
+    else:
+        filtered_matrix = matrix
+        filtered_mask = observed_mask
+        kept_indices = np.arange(n_voters_original)
+        n_voters_filtered = n_voters_original
 
     # Step 1: Impute missing values
-    imputed = impute_column_mean(matrix, observed_mask)
+    imputed = impute_column_mean(filtered_matrix, filtered_mask)
 
     # Step 2: PCA projections
     projections = compute_voter_pca_projections(imputed, n_pca_components)
@@ -287,20 +361,22 @@ def polis_consensus_pipeline(
         projections, max_k=max_k, seed=seed
     )
 
-    # Step 4: Compute consensus
+    # Step 4: Compute consensus (on filtered data)
     consensus_scores = compute_group_informed_consensus(
-        matrix, observed_mask, cluster_labels
+        filtered_matrix, filtered_mask, cluster_labels
     )
 
     # Metadata
     unique_labels, counts = np.unique(cluster_labels, return_counts=True)
     metadata = {
         "n_items": n_items,
-        "n_voters": n_voters,
+        "n_voters_original": n_voters_original,
+        "n_voters_filtered": n_voters_filtered,
+        "participants_filtered": filter_participants,
         "n_pca_components": n_pca_components,
         "k_clusters": best_k,
         "cluster_sizes": counts.tolist(),
-        "observation_rate": observed_mask.sum() / observed_mask.size,
+        "observation_rate": filtered_mask.sum() / filtered_mask.size,
     }
 
     return consensus_scores, metadata

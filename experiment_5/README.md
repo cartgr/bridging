@@ -2,6 +2,7 @@
 
 > **TODO:**
 > - [ ] Do a full run of the simulation experiment (all 6 datasets, 30+ trials)
+> - [ ] Add variance analysis (estimate variance across trials for each method)
 
 Compares robustness of bridging scores vs Pol.is Group-Informed Consensus under missing data.
 
@@ -16,8 +17,8 @@ python experiment_5/run_simulation_experiment.py   # Simulated Polis routing
 
 | Condition | Missingness | Result |
 |-----------|-------------|--------|
-| MCAR | Uniform random | Bridging wins 39, Polis wins 0, Ties 3 |
-| Simulated | Polis routing | In progress |
+| MCAR | Uniform random | Bridging wins all 7 mask rates (ρ 0.93–0.99 vs 0.73–0.97) |
+| Simulated | Polis routing | Bridging maintains ρ > 0.83 at 30% obs; Polis drops to ρ ≈ 0.17 |
 
 ## Methods Compared
 
@@ -38,6 +39,10 @@ Implemented in [`polis.py`](polis.py), based on [conversation.clj](https://githu
 
 ### Pipeline
 
+0. **Participant Filtering** ([`filter_participants_by_votes()`](polis.py)): Remove low-activity voters
+   - Require min(7, n_comments) votes per participant
+   - If < 15 participants remain, greedily add top contributors
+
 1. **Imputation** ([`impute_column_mean()`](polis.py)): Replace missing votes with per-comment mean
 
 2. **PCA** ([`compute_voter_pca_projections()`](polis.py)): Project voters onto 2 components using power iteration
@@ -57,6 +62,10 @@ The product formula means one dissenting group kills the score—preventing "tyr
 ### Numerical Stability
 
 Uses log-sum-exp to avoid underflow: `log(consensus) = Σ_g log(P_g)`
+
+### Differences from Production Polis
+
+- **No k-smoothing buffer**: Production Polis requires seeing the same optimal k for 4 consecutive updates before switching (for streaming stability). We select k once per analysis since our data is static.
 
 ## Simulated Polis Routing
 
