@@ -572,6 +572,144 @@ def plot_simulation_multi_metric(
     plt.close()
 
 
+def plot_ranking_stability(
+    aggregated: Dict,
+    output_path: Path,
+    title: Optional[str] = None,
+    figsize: tuple = (14, 5),
+) -> None:
+    """
+    Plot ranking stability metrics vs observation rate (MCAR experiment).
+
+    Creates side-by-side plots of top-1 frequency and rank correlation.
+
+    Args:
+        aggregated: output from aggregate_by_mask_rate
+        output_path: path to save the plot
+        title: optional overall title
+        figsize: figure size
+    """
+    mask_rates = aggregated["mask_rates"]
+    bridging = aggregated["bridging"]
+    polis = aggregated["polis"]
+    obs_rates = [1 - r for r in mask_rates]
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # Plot 1: Top-1 Frequency
+    ax = axes[0]
+    bridging_top1 = [bridging[r].get("stability_top_1_frequency", np.nan) for r in mask_rates]
+    polis_top1 = [polis[r].get("stability_top_1_frequency", np.nan) for r in mask_rates]
+
+    ax.plot(obs_rates, bridging_top1, "b-o", label="Bridging Score", linewidth=2)
+    ax.plot(obs_rates, polis_top1, "r-o", label="Polis Consensus", linewidth=2)
+
+    ax.set_xlabel("Observation Rate", fontsize=11)
+    ax.set_ylabel("Top-1 Frequency", fontsize=11)
+    ax.set_title("Top-1 Stability (higher = more stable)", fontsize=12)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.invert_xaxis()
+    ax.set_ylim(0, 1.05)
+
+    # Plot 2: Rank Correlation Between Trials
+    ax = axes[1]
+    bridging_corr = [bridging[r].get("stability_rank_correlation_mean", np.nan) for r in mask_rates]
+    polis_corr = [polis[r].get("stability_rank_correlation_mean", np.nan) for r in mask_rates]
+
+    ax.plot(obs_rates, bridging_corr, "b-o", label="Bridging Score", linewidth=2)
+    ax.plot(obs_rates, polis_corr, "r-o", label="Polis Consensus", linewidth=2)
+
+    ax.set_xlabel("Observation Rate", fontsize=11)
+    ax.set_ylabel("Rank Correlation", fontsize=11)
+    ax.set_title("Inter-Trial Rank Correlation (higher = more stable)", fontsize=12)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.invert_xaxis()
+    ax.set_ylim(0, 1.05)
+
+    if title:
+        fig.suptitle(title, fontsize=14, y=1.02)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_simulation_ranking_stability(
+    aggregated: Dict,
+    output_path: Path,
+    title: Optional[str] = None,
+    figsize: tuple = (14, 5),
+) -> None:
+    """
+    Plot ranking stability metrics vs observation rate (simulation experiment).
+
+    Creates side-by-side plots of top-1 frequency and rank correlation for all 3 methods.
+
+    Args:
+        aggregated: output from aggregate_simulation_results
+        output_path: path to save the plot
+        title: optional overall title
+        figsize: figure size
+    """
+    distribution_names = aggregated["distribution_names"]
+    bridging_naive = aggregated["bridging_naive"]
+    bridging_ipw = aggregated["bridging_ipw"]
+    polis = aggregated["polis"]
+
+    # Get observation rates and sort
+    obs_rates = [bridging_naive[d]["observation_rate_mean"] for d in distribution_names]
+    sorted_indices = np.argsort(obs_rates)[::-1]
+    obs_rates_sorted = [obs_rates[i] for i in sorted_indices]
+    dist_sorted = [distribution_names[i] for i in sorted_indices]
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # Plot 1: Top-1 Frequency
+    ax = axes[0]
+    naive_top1 = [bridging_naive[d].get("stability_top_1_frequency", np.nan) for d in dist_sorted]
+    ipw_top1 = [bridging_ipw[d].get("stability_top_1_frequency", np.nan) for d in dist_sorted]
+    polis_top1 = [polis[d].get("stability_top_1_frequency", np.nan) for d in dist_sorted]
+
+    ax.plot(obs_rates_sorted, naive_top1, "b-o", label="Bridging (Naive)", linewidth=2)
+    ax.plot(obs_rates_sorted, ipw_top1, "g-o", label="Bridging (IPW)", linewidth=2)
+    ax.plot(obs_rates_sorted, polis_top1, "r-o", label="Polis Consensus", linewidth=2)
+
+    ax.set_xlabel("Observation Rate", fontsize=11)
+    ax.set_ylabel("Top-1 Frequency", fontsize=11)
+    ax.set_title("Top-1 Stability (higher = more stable)", fontsize=12)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.invert_xaxis()
+    ax.set_ylim(0, 1.05)
+
+    # Plot 2: Rank Correlation Between Trials
+    ax = axes[1]
+    naive_corr = [bridging_naive[d].get("stability_rank_correlation_mean", np.nan) for d in dist_sorted]
+    ipw_corr = [bridging_ipw[d].get("stability_rank_correlation_mean", np.nan) for d in dist_sorted]
+    polis_corr = [polis[d].get("stability_rank_correlation_mean", np.nan) for d in dist_sorted]
+
+    ax.plot(obs_rates_sorted, naive_corr, "b-o", label="Bridging (Naive)", linewidth=2)
+    ax.plot(obs_rates_sorted, ipw_corr, "g-o", label="Bridging (IPW)", linewidth=2)
+    ax.plot(obs_rates_sorted, polis_corr, "r-o", label="Polis Consensus", linewidth=2)
+
+    ax.set_xlabel("Observation Rate", fontsize=11)
+    ax.set_ylabel("Rank Correlation", fontsize=11)
+    ax.set_title("Inter-Trial Rank Correlation (higher = more stable)", fontsize=12)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.invert_xaxis()
+    ax.set_ylim(0, 1.05)
+
+    if title:
+        fig.suptitle(title, fontsize=14, y=1.02)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
 def create_simulation_summary_table(
     aggregated: Dict,
     output_path: Path,

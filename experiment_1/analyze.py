@@ -277,11 +277,18 @@ def load_matrix(filepath: Path) -> np.ndarray:
         raise KeyError(f"No 'matrix' or 'arr_0' key in {filepath}")
 
 
-# French election candidate names
-CANDIDATE_NAMES = [
+# French election 2002 candidate names (00026)
+CANDIDATE_NAMES_2002 = [
     'Megret', 'Lepage', 'Gluckstein', 'Bayrou', 'Chirac',
     'LePen', 'Taubira', 'Saint-Josse', 'Mamere', 'Jospin',
     'Boutin', 'Hue', 'Chevenement', 'Madelin', 'Laguiller', 'Besancenot'
+]
+
+# French election 2007 candidate names (00071)
+CANDIDATE_NAMES_2007 = [
+    'Besancenot', 'Buffet', 'Schivardi', 'Bayrou', 'Bove',
+    'Voynet', 'Villiers', 'Royal', 'Nihous', 'Le Pen',
+    'Sarkozy', 'Laguiller'
 ]
 
 
@@ -300,7 +307,10 @@ def main():
 
     # Define data sources
     data_sources = [
-        ('data/processed/preflib', '00026-*.npz', 'French Election'),
+        ('data/processed/preflib', '00026-*.npz', 'French Election 2002'),
+        ('data/processed/preflib', '00033-*.npz', 'San Sebastian Poster'),
+        ('data/processed/preflib', '00063-*.npz', 'CTU Tutorial'),
+        ('data/processed/preflib', '00071-*.npz', 'French Election 2007'),
         ('data/completed', '00069-*.npz', 'Pol.is (Completed)'),
     ]
 
@@ -317,6 +327,11 @@ def main():
         matrix = load_matrix(filepath)
         n_items, n_voters = matrix.shape
 
+        # Skip files with missing values (Polis pipeline requires complete data)
+        if np.isnan(matrix).any():
+            print(f"  Skipping {file_id}: contains NaN values")
+            continue
+
         # Compute metrics
         rates = compute_approval_rates(matrix)
         diversity = compute_approver_diversity(matrix)
@@ -330,7 +345,9 @@ def main():
 
         # Get item names
         if '00026' in file_id:
-            item_names = CANDIDATE_NAMES[:n_items]
+            item_names = CANDIDATE_NAMES_2002[:n_items]
+        elif '00071' in file_id:
+            item_names = CANDIDATE_NAMES_2007[:n_items]
         else:
             item_names = [f'Item {i}' for i in range(n_items)]
 

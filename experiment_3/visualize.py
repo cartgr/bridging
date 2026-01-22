@@ -23,12 +23,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from experiment_2.bridging import compute_bridging_scores_vectorized
 
 
-# Candidate names in row order
-CANDIDATE_NAMES = [
+# French election 2002 candidate names (00026)
+CANDIDATE_NAMES_2002 = [
     'Megret', 'Lepage', 'Gluckstein', 'Bayrou', 'Chirac',
     'LePen', 'Taubira', 'Saint-Josse', 'Mamere', 'Jospin',
     'Boutin', 'Hue', 'Chevenement', 'Madelin', 'Laguiller', 'Besancenot'
 ]
+
+# French election 2007 candidate names (00071)
+CANDIDATE_NAMES_2007 = [
+    'Besancenot', 'Buffet', 'Schivardi', 'Bayrou', 'Bove',
+    'Voynet', 'Villiers', 'Royal', 'Nihous', 'Le Pen',
+    'Sarkozy', 'Laguiller'
+]
+
+# Keep backward compatibility
+CANDIDATE_NAMES = CANDIDATE_NAMES_2002
 
 
 def compute_voter_pca_scores(matrix: np.ndarray) -> np.ndarray:
@@ -203,8 +213,19 @@ def plot_voter_spectrum(
             family='monospace',
         )
 
+        # Add approval fraction
+        approval_frac = matrix[cand_idx].mean()
+        ax.text(
+            pc1_max + x_margin + 0.9, y_base + row_height * 0.3,
+            f'{approval_frac:.0%}',
+            fontsize=10,
+            ha='left',
+            va='center',
+            family='monospace',
+        )
+
     # Format axes
-    ax.set_xlim(pc1_min - x_margin - 1.5, pc1_max + x_margin + 0.8)
+    ax.set_xlim(pc1_min - x_margin - 1.5, pc1_max + x_margin + 1.5)
     ax.set_ylim(-0.5, n_candidates + 0.5)
     ax.set_yticks([])
     ax.set_xlabel('PC1 Score (Left ← → Right)', fontsize=11)
@@ -220,6 +241,8 @@ def plot_voter_spectrum(
     ax.text((pc1_min + pc1_max) / 2, n_candidates + 0.3, 'Voter Approval Distribution',
             fontsize=11, fontweight='bold', ha='center')
     ax.text(pc1_max + x_margin + 0.4, n_candidates + 0.3, 'Bridging',
+            fontsize=11, fontweight='bold', ha='center')
+    ax.text(pc1_max + x_margin + 1.1, n_candidates + 0.3, 'Appr',
             fontsize=11, fontweight='bold', ha='center')
 
     # Add colorbar
@@ -377,8 +400,19 @@ def plot_voter_spectrum_histogram(
             family='monospace',
         )
 
+        # Add approval fraction
+        approval_frac = matrix[cand_idx].mean()
+        ax.text(
+            pc1_max + x_margin + 0.9, y_base + row_height * 0.3,
+            f'{approval_frac:.0%}',
+            fontsize=10,
+            ha='left',
+            va='center',
+            family='monospace',
+        )
+
     # Format axes
-    ax.set_xlim(pc1_min - x_margin - 1.5, pc1_max + x_margin + 0.8)
+    ax.set_xlim(pc1_min - x_margin - 1.5, pc1_max + x_margin + 1.5)
     ax.set_ylim(-0.5, n_candidates + 0.5)
     ax.set_yticks([])
     ax.set_xlabel('PC1 Score (Left ← → Right)', fontsize=11)
@@ -393,6 +427,8 @@ def plot_voter_spectrum_histogram(
     ax.text((pc1_min + pc1_max) / 2, n_candidates + 0.3, 'Approval Rate by Position',
             fontsize=11, fontweight='bold', ha='center')
     ax.text(pc1_max + x_margin + 0.4, n_candidates + 0.3, 'Bridging',
+            fontsize=11, fontweight='bold', ha='center')
+    ax.text(pc1_max + x_margin + 1.1, n_candidates + 0.3, 'Appr',
             fontsize=11, fontweight='bold', ha='center')
 
     # Add legend
@@ -533,31 +569,68 @@ def process_dataset(
 
 
 def main():
-    """Generate plots for French election and Pol.is datasets."""
+    """Generate plots for all approval voting datasets."""
     base_dir = Path(__file__).parent.parent
     output_dir = Path(__file__).parent / 'plots'
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process French election files (00026)
-    french_dir = base_dir / 'data' / 'processed' / 'preflib'
-    french_pattern = str(french_dir / '00026-*.npz')
-    french_files = sorted(glob(french_pattern))
+    preflib_dir = base_dir / 'data' / 'processed' / 'preflib'
 
-    if french_files:
-        print(f"Processing {len(french_files)} French election files...")
-        for filepath in french_files:
+    # Process French election 2002 files (00026)
+    french_2002_files = sorted(glob(str(preflib_dir / '00026-*.npz')))
+    if french_2002_files:
+        print(f"Processing {len(french_2002_files)} French Election 2002 files...")
+        for filepath in french_2002_files:
             process_dataset(
                 Path(filepath),
                 output_dir,
-                'French Election',
-                item_names=CANDIDATE_NAMES,
+                'French Election 2002',
+                item_names=CANDIDATE_NAMES_2002,
+            )
+
+    # Process San Sebastian Poster files (00033)
+    poster_files = sorted(glob(str(preflib_dir / '00033-*.npz')))
+    if poster_files:
+        print(f"\nProcessing {len(poster_files)} San Sebastian Poster files...")
+        for filepath in poster_files:
+            process_dataset(
+                Path(filepath),
+                output_dir,
+                'San Sebastian Poster',
+                item_names=None,  # Auto-generate
+            )
+
+    # Process CTU Tutorial files (00063)
+    ctu_files = sorted(glob(str(preflib_dir / '00063-*.npz')))
+    if ctu_files:
+        print(f"\nProcessing {len(ctu_files)} CTU Tutorial files...")
+        for filepath in ctu_files:
+            process_dataset(
+                Path(filepath),
+                output_dir,
+                'CTU Tutorial',
+                item_names=None,  # Auto-generate
+            )
+
+    # Process French election 2007 files (00071) - only fully observed ones (1-6)
+    french_2007_files = []
+    for i in range(1, 7):
+        f = preflib_dir / f'00071-{i:08d}.npz'
+        if f.exists():
+            french_2007_files.append(f)
+    if french_2007_files:
+        print(f"\nProcessing {len(french_2007_files)} French Election 2007 files...")
+        for filepath in french_2007_files:
+            process_dataset(
+                Path(filepath),
+                output_dir,
+                'French Election 2007',
+                item_names=CANDIDATE_NAMES_2007,
             )
 
     # Process Pol.is completed files (00069)
     polis_dir = base_dir / 'data' / 'completed'
-    polis_pattern = str(polis_dir / '00069-*.npz')
-    polis_files = sorted(glob(polis_pattern))
-
+    polis_files = sorted(glob(str(polis_dir / '00069-*.npz')))
     if polis_files:
         print(f"\nProcessing {len(polis_files)} Pol.is files...")
         for filepath in polis_files:
@@ -573,31 +646,68 @@ def main():
 
 
 def main_histogram():
-    """Generate histogram plots for French election and Pol.is datasets."""
+    """Generate histogram plots for all approval voting datasets."""
     base_dir = Path(__file__).parent.parent
     output_dir = Path(__file__).parent / 'plots_histogram'
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process French election files (00026)
-    french_dir = base_dir / 'data' / 'processed' / 'preflib'
-    french_pattern = str(french_dir / '00026-*.npz')
-    french_files = sorted(glob(french_pattern))
+    preflib_dir = base_dir / 'data' / 'processed' / 'preflib'
 
-    if french_files:
-        print(f"Processing {len(french_files)} French election files...")
-        for filepath in french_files:
+    # Process French election 2002 files (00026)
+    french_2002_files = sorted(glob(str(preflib_dir / '00026-*.npz')))
+    if french_2002_files:
+        print(f"Processing {len(french_2002_files)} French Election 2002 files...")
+        for filepath in french_2002_files:
             process_dataset_histogram(
                 Path(filepath),
                 output_dir,
-                'French Election',
-                item_names=CANDIDATE_NAMES,
+                'French Election 2002',
+                item_names=CANDIDATE_NAMES_2002,
+            )
+
+    # Process San Sebastian Poster files (00033)
+    poster_files = sorted(glob(str(preflib_dir / '00033-*.npz')))
+    if poster_files:
+        print(f"\nProcessing {len(poster_files)} San Sebastian Poster files...")
+        for filepath in poster_files:
+            process_dataset_histogram(
+                Path(filepath),
+                output_dir,
+                'San Sebastian Poster',
+                item_names=None,
+            )
+
+    # Process CTU Tutorial files (00063)
+    ctu_files = sorted(glob(str(preflib_dir / '00063-*.npz')))
+    if ctu_files:
+        print(f"\nProcessing {len(ctu_files)} CTU Tutorial files...")
+        for filepath in ctu_files:
+            process_dataset_histogram(
+                Path(filepath),
+                output_dir,
+                'CTU Tutorial',
+                item_names=None,
+            )
+
+    # Process French election 2007 files (00071) - only fully observed ones (1-6)
+    french_2007_files = []
+    for i in range(1, 7):
+        f = preflib_dir / f'00071-{i:08d}.npz'
+        if f.exists():
+            french_2007_files.append(f)
+    if french_2007_files:
+        print(f"\nProcessing {len(french_2007_files)} French Election 2007 files...")
+        for filepath in french_2007_files:
+            process_dataset_histogram(
+                Path(filepath),
+                output_dir,
+                'French Election 2007',
+                item_names=CANDIDATE_NAMES_2007,
             )
 
     # Process Pol.is completed files (00069)
     polis_dir = base_dir / 'data' / 'completed'
-    polis_pattern = str(polis_dir / '00069-*.npz')
-    polis_files = sorted(glob(polis_pattern))
-
+    polis_files = sorted(glob(str(polis_dir / '00069-*.npz')))
     if polis_files:
         print(f"\nProcessing {len(polis_files)} Pol.is files...")
         for filepath in polis_files:
@@ -605,8 +715,8 @@ def main_histogram():
                 Path(filepath),
                 output_dir,
                 'Pol.is',
-                item_names=None,  # Will auto-generate
-                max_items=30,  # Show top 30 comments
+                item_names=None,
+                max_items=30,
             )
 
     print(f"\nAll plots saved to: {output_dir}")

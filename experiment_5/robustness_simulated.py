@@ -81,7 +81,7 @@ def simulate_voter_session_polis(
     k_votes: int,
     priorities: np.ndarray,
     rng: np.random.Generator,
-    mc_samples: int = 100,
+    mc_samples: int = 500,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Simulate a single voter's session with Polis-style priority-based routing.
@@ -126,7 +126,8 @@ def simulate_polis_routing(
     ground_truth: np.ndarray,
     votes_distribution: np.ndarray,
     seed: int = 42,
-    mc_samples: int = 100,
+    mc_samples: int = 500,
+    show_progress: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Simulate Polis-style routing with PCA-based priorities.
@@ -138,6 +139,7 @@ def simulate_polis_routing(
         votes_distribution: array of vote counts to sample from
         seed: random seed
         mc_samples: MC samples for inclusion prob estimation
+        show_progress: whether to show voter progress bar
 
     Returns:
         Tuple of (observed_mask, inclusion_probs)
@@ -149,7 +151,11 @@ def simulate_polis_routing(
     observed_mask = np.zeros((n_items, n_voters), dtype=bool)
     inclusion_probs = np.zeros((n_items, n_voters))
 
-    for voter_idx in range(n_voters):
+    voter_iter = range(n_voters)
+    if show_progress:
+        voter_iter = tqdm(voter_iter, desc="    Voters", leave=False)
+
+    for voter_idx in voter_iter:
         # Compute PCA extremeness and priorities for this voter
         extremeness = compute_pca_extremeness(observed_matrix, observed_mask)
         priorities = compute_priorities(observed_matrix, observed_mask, extremeness)
@@ -189,7 +195,8 @@ def run_single_simulation_trial(
     gt_bridging: np.ndarray,
     gt_polis: np.ndarray,
     polis_max_k: int = 5,
-    mc_samples: int = 100,
+    mc_samples: int = 500,
+    show_voter_progress: bool = False,
 ) -> Dict:
     """
     Run one simulation trial with Polis-style routing and compute all estimators.
@@ -214,6 +221,7 @@ def run_single_simulation_trial(
         votes_distribution,
         seed=seed,
         mc_samples=mc_samples,
+        show_progress=show_voter_progress,
     )
 
     # Create observed matrix
@@ -253,7 +261,7 @@ def run_simulation_experiment(
     n_trials: int = 30,
     base_seed: int = 42,
     polis_max_k: int = 5,
-    mc_samples: int = 100,
+    mc_samples: int = 500,
     show_progress: bool = True,
 ) -> Dict:
     """
@@ -283,14 +291,23 @@ def run_simulation_experiment(
     # Run trials
     results = {name: [] for name in votes_distributions}
     trial_idx = 0
+    n_dists = len(votes_distributions)
 
-    for dist_name, votes_dist in votes_distributions.items():
+    dist_iter = votes_distributions.items()
+    if show_progress:
+        dist_iter = tqdm(list(dist_iter), desc="  Obs rates", position=0)
+
+    for dist_name, votes_dist in dist_iter:
+        trial_iter = range(n_trials)
         if show_progress:
-            print(f"  Running distribution: {dist_name}")
+            trial_iter = tqdm(trial_iter, desc=f"    {dist_name}", position=1, leave=False)
 
-        for trial in tqdm(range(n_trials), desc=f"  {dist_name}", disable=not show_progress):
+        for trial in trial_iter:
             seed = base_seed + trial_idx
             trial_idx += 1
+
+            # Show voter progress only for first trial of first distribution
+            show_voters = show_progress and trial == 0 and trial_idx <= n_trials
 
             trial_result = run_single_simulation_trial(
                 matrix,
@@ -300,6 +317,7 @@ def run_simulation_experiment(
                 gt_polis,
                 polis_max_k=polis_max_k,
                 mc_samples=mc_samples,
+                show_voter_progress=show_voters,
             )
             results[dist_name].append(trial_result)
 
@@ -337,7 +355,7 @@ def run_simulation_experiment_on_datasets(
     n_trials: int = 30,
     base_seed: int = 42,
     polis_max_k: int = 5,
-    mc_samples: int = 100,
+    mc_samples: int = 500,
     show_progress: bool = True,
 ) -> Dict:
     """

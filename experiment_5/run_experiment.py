@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,8 +24,10 @@ from experiment_5.visualize import (
     plot_variance_comparison,
     plot_multi_metric,
     plot_top_k_precision,
+    plot_ranking_stability,
     create_summary_table,
 )
+from experiment_5.run_simulation_experiment import run_full_simulation_experiment
 
 
 def find_data_files() -> list[Path]:
@@ -144,6 +147,13 @@ def run_single_dataset_experiment(
         title=f"{name}: Top-3 Precision vs Observation Rate",
     )
 
+    # Ranking stability plot
+    plot_ranking_stability(
+        aggregated,
+        dataset_plots_dir / "ranking_stability.png",
+        title=f"{name}: Ranking Stability",
+    )
+
     # Summary table
     create_summary_table(
         aggregated,
@@ -195,7 +205,7 @@ def run_full_experiment():
     # Run experiments
     all_results = {}
 
-    for data_path in data_files:
+    for data_path in tqdm(data_files, desc="Datasets (MCAR)"):
         result = run_single_dataset_experiment(
             data_path,
             mask_rates=mask_rates,
@@ -240,6 +250,12 @@ def run_full_experiment():
         title="Combined: Robustness Comparison (Mean Across Datasets)",
     )
 
+    plot_ranking_stability(
+        combined_aggregated,
+        plots_dir / "combined_ranking_stability.png",
+        title="Combined: Ranking Stability",
+    )
+
     create_summary_table(
         combined_aggregated,
         plots_dir / "combined_summary.md",
@@ -279,7 +295,10 @@ def _combine_aggregations(all_results: dict, mask_rates: list[float]) -> dict:
                     "mae_mean", "mae_std", "mean_estimate_variance",
                     "top_1_precision_mean", "top_1_precision_std",
                     "top_3_precision_mean", "top_3_precision_std",
-                    "top_5_precision_mean", "top_5_precision_std"]:
+                    "top_5_precision_mean", "top_5_precision_std",
+                    # Ranking stability metrics
+                    "stability_top_1_frequency", "stability_rank_correlation_mean",
+                    "stability_top_1_jaccard", "stability_top_3_jaccard", "stability_top_5_jaccard"]:
             b_vals = []
             p_vals = []
             for r in all_results.values():
@@ -308,4 +327,11 @@ def _combine_aggregations(all_results: dict, mask_rates: list[float]) -> dict:
 
 
 if __name__ == "__main__":
+    # Run MCAR masking experiment
     run_full_experiment()
+
+    # Run simulated Polis routing experiment
+    print("\n" + "=" * 60)
+    print("Now running simulated Polis routing experiment...")
+    print("=" * 60 + "\n")
+    run_full_simulation_experiment()

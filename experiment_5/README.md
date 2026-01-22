@@ -2,8 +2,6 @@
 
 > **TODO:**
 > - [ ] Do a full run of the simulation experiment (all 6 datasets, 30+ trials)
-> - [ ] Add variance analysis (estimate variance across trials for each method)
-> - [ ] Measure ranking stability (how often does the top-k ranking change across trials?)
 
 Compares robustness of bridging scores vs Pol.is Group-Informed Consensus under missing data.
 
@@ -76,7 +74,7 @@ For each voter:
 1. Compute PCA extremeness on current observed matrix
 2. Compute priorities using Pol.is formula (reuses [`experiment_2/priority.py`](../experiment_2/priority.py))
 3. Sample k comments via PPS (probability proportional to priority) without replacement
-4. Estimate inclusion probabilities via Monte Carlo (100 samples)
+4. Estimate inclusion probabilities via Monte Carlo (500 samples)
 
 This creates realistic informative missingness matching actual Pol.is behavior.
 

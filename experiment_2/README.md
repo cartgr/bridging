@@ -12,7 +12,7 @@ Pol.is uses adaptive routing that creates **informative missingness**: comments 
 ## Usage
 
 ```bash
-python experiment_2/run_experiment.py
+python -m experiment_2.run_experiment
 ```
 
 ## Output
@@ -57,7 +57,7 @@ Implemented in [`priority.py:compute_pca_extremeness()`](priority.py), based on 
 
 ### Inclusion Probability Computation
 
-Implemented in [`priority.py`](priority.py). For PPS sampling without replacement, inclusion probabilities are estimated via Monte Carlo simulation (2000 samples by default).
+Implemented in [`priority.py`](priority.py). For PPS sampling without replacement, inclusion probabilities are estimated via Monte Carlo simulation (500 samples by default).
 
 ### IPW Estimator
 

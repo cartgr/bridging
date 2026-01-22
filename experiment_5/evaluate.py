@@ -115,6 +115,111 @@ def compute_robustness_metrics(
     return result
 
 
+def compute_ranking_stability(
+    estimates_list: List[np.ndarray],
+    k_values: List[int] = [1, 3, 5],
+) -> Dict:
+    """
+    Compute ranking stability metrics across trials.
+
+    Measures how consistent rankings are across different trials,
+    independent of ground truth.
+
+    Args:
+        estimates_list: list of (n_items,) score arrays from different trials
+        k_values: k values for top-k stability metrics
+
+    Returns:
+        Dict containing:
+        - top_1_most_common: most frequently top-ranked item
+        - top_1_frequency: fraction of trials where most common is #1
+        - top_1_entropy: entropy of top-1 distribution (lower = more stable)
+        - top_k_jaccard_{k}: average pairwise Jaccard similarity of top-k sets
+        - rank_correlation_mean: average pairwise Spearman between trial rankings
+        - rank_correlation_std: std of pairwise Spearman correlations
+    """
+    n_trials = len(estimates_list)
+    if n_trials < 2:
+        return _empty_stability_metrics(k_values)
+
+    # Get rankings for each trial (handling NaN as -inf)
+    rankings = []
+    top_1_items = []
+    for est in estimates_list:
+        est_safe = np.where(np.isnan(est), -np.inf, est)
+        ranking = np.argsort(est_safe)[::-1]  # Descending
+        rankings.append(ranking)
+        top_1_items.append(ranking[0])
+
+    # Top-1 stability
+    from collections import Counter
+    top_1_counts = Counter(top_1_items)
+    most_common_item, most_common_count = top_1_counts.most_common(1)[0]
+    top_1_frequency = most_common_count / n_trials
+
+    # Top-1 entropy (lower = more stable)
+    probs = np.array(list(top_1_counts.values())) / n_trials
+    top_1_entropy = -np.sum(probs * np.log(probs + 1e-10))
+
+    # Top-k Jaccard similarity (average pairwise)
+    top_k_jaccard = {}
+    for k in k_values:
+        jaccard_scores = []
+        for i in range(n_trials):
+            for j in range(i + 1, n_trials):
+                set_i = set(rankings[i][:k])
+                set_j = set(rankings[j][:k])
+                intersection = len(set_i & set_j)
+                union = len(set_i | set_j)
+                jaccard = intersection / union if union > 0 else 1.0
+                jaccard_scores.append(jaccard)
+        top_k_jaccard[k] = np.mean(jaccard_scores) if jaccard_scores else np.nan
+
+    # Pairwise rank correlations between trials
+    rank_correlations = []
+    for i in range(n_trials):
+        for j in range(i + 1, n_trials):
+            est_i = estimates_list[i]
+            est_j = estimates_list[j]
+            # Handle NaN
+            valid = ~np.isnan(est_i) & ~np.isnan(est_j)
+            if valid.sum() >= 2:
+                corr, _ = stats.spearmanr(est_i[valid], est_j[valid])
+                if not np.isnan(corr):
+                    rank_correlations.append(corr)
+
+    result = {
+        "n_trials": n_trials,
+        "top_1_most_common": int(most_common_item),
+        "top_1_frequency": top_1_frequency,
+        "top_1_entropy": top_1_entropy,
+        "top_1_unique_count": len(top_1_counts),
+        "rank_correlation_mean": _safe_mean(rank_correlations),
+        "rank_correlation_std": _safe_std(rank_correlations),
+    }
+
+    for k in k_values:
+        result[f"top_{k}_jaccard"] = top_k_jaccard[k]
+
+    return result
+
+
+def _empty_stability_metrics(k_values: List[int]) -> Dict:
+    """Return empty stability metrics dict."""
+    result = {
+        "n_trials": 0,
+        "top_1_most_common": -1,
+        "top_1_frequency": np.nan,
+        "top_1_entropy": np.nan,
+        "top_1_unique_count": 0,
+        "rank_correlation_mean": np.nan,
+        "rank_correlation_std": np.nan,
+    }
+    for k in k_values:
+        result[f"top_{k}_jaccard"] = np.nan
+    return result
+
+
 def _safe_mean(values: List[float]) -> float:
     """Compute mean, returning NaN for empty lists."""
     if not values:
@@ -184,13 +289,23 @@ def aggregate_by_mask_rate(
         bridging_estimates = [t["bridging_scores"] for t in trials]
         polis_estimates = [t["polis_scores"] for t in trials]
 
-        # Compute metrics
+        # Compute metrics (vs ground truth)
         bridging_metrics = compute_robustness_metrics(
             gt_bridging, bridging_estimates, k_values
         )
         polis_metrics = compute_robustness_metrics(
             gt_polis, polis_estimates, k_values
         )
+
+        # Compute ranking stability (across trials)
+        bridging_stability = compute_ranking_stability(bridging_estimates, k_values)
+        polis_stability = compute_ranking_stability(polis_estimates, k_values)
+
+        # Merge stability metrics
+        for key, val in bridging_stability.items():
+            bridging_metrics[f"stability_{key}"] = val
+        for key, val in polis_stability.items():
+            polis_metrics[f"stability_{key}"] = val
 
         # Add actual mask rate info
         actual_rates = [t["actual_mask_rate"] for t in trials]
@@ -312,7 +427,7 @@ def aggregate_simulation_results(
         bridging_ipw_estimates = [t["bridging_ipw"] for t in trials]
         polis_estimates = [t["polis_scores"] for t in trials]
 
-        # Compute metrics
+        # Compute metrics (vs ground truth)
         naive_metrics = compute_robustness_metrics(
             gt_bridging, bridging_naive_estimates, k_values
         )
@@ -322,6 +437,19 @@ def aggregate_simulation_results(
         polis_metrics = compute_robustness_metrics(
             gt_polis, polis_estimates, k_values
         )
+
+        # Compute ranking stability (across trials, independent of ground truth)
+        naive_stability = compute_ranking_stability(bridging_naive_estimates, k_values)
+        ipw_stability = compute_ranking_stability(bridging_ipw_estimates, k_values)
+        polis_stability = compute_ranking_stability(polis_estimates, k_values)
+
+        # Merge stability metrics
+        for key, val in naive_stability.items():
+            naive_metrics[f"stability_{key}"] = val
+        for key, val in ipw_stability.items():
+            ipw_metrics[f"stability_{key}"] = val
+        for key, val in polis_stability.items():
+            polis_metrics[f"stability_{key}"] = val
 
         # Add observation rate info
         obs_rates = [t["observation_rate"] for t in trials]
@@ -423,6 +551,27 @@ def compute_simulation_summary(aggregated: Dict) -> Dict:
     )
     summary["polis_variance_avg"] = np.mean(
         [polis[d]["mean_estimate_variance"] for d in distribution_names]
+    )
+
+    # Ranking stability averages
+    summary["naive_top1_freq_avg"] = np.mean(
+        [bridging_naive[d].get("stability_top_1_frequency", np.nan) for d in distribution_names]
+    )
+    summary["ipw_top1_freq_avg"] = np.mean(
+        [bridging_ipw[d].get("stability_top_1_frequency", np.nan) for d in distribution_names]
+    )
+    summary["polis_top1_freq_avg"] = np.mean(
+        [polis[d].get("stability_top_1_frequency", np.nan) for d in distribution_names]
+    )
+
+    summary["naive_rank_corr_avg"] = np.mean(
+        [bridging_naive[d].get("stability_rank_correlation_mean", np.nan) for d in distribution_names]
+    )
+    summary["ipw_rank_corr_avg"] = np.mean(
+        [bridging_ipw[d].get("stability_rank_correlation_mean", np.nan) for d in distribution_names]
+    )
+    summary["polis_rank_corr_avg"] = np.mean(
+        [polis[d].get("stability_rank_correlation_mean", np.nan) for d in distribution_names]
     )
 
     return summary

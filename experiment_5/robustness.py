@@ -201,12 +201,16 @@ def run_masking_experiment(
     results = {rate: [] for rate in mask_rates}
     seed_idx = 0
 
-    iterator = mask_rates
+    mask_iter = mask_rates
     if show_progress:
-        iterator = tqdm(mask_rates, desc="Mask rates")
+        mask_iter = tqdm(mask_rates, desc="  Mask rates", position=0)
 
-    for mask_rate in iterator:
-        for trial in range(n_trials):
+    for mask_rate in mask_iter:
+        trial_iter = range(n_trials)
+        if show_progress:
+            trial_iter = tqdm(trial_iter, desc=f"    {1-mask_rate:.0%} obs", position=1, leave=False)
+
+        for trial in trial_iter:
             seed = int(all_seeds[seed_idx])
             seed_idx += 1
 

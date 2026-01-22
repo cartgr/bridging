@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,6 +32,7 @@ from experiment_5.evaluate import (
 from experiment_5.visualize import (
     plot_simulation_comparison,
     plot_simulation_multi_metric,
+    plot_simulation_ranking_stability,
     create_simulation_summary_table,
 )
 
@@ -99,7 +101,7 @@ def run_single_dataset_simulation(
         n_trials=n_trials,
         base_seed=base_seed,
         polis_max_k=5,
-        mc_samples=100,
+        mc_samples=500,
         show_progress=True,
     )
 
@@ -144,6 +146,13 @@ def run_single_dataset_simulation(
         title=f"{name}: Robustness Under Simulated Routing",
     )
 
+    # Ranking stability
+    plot_simulation_ranking_stability(
+        aggregated,
+        dataset_plots_dir / "ranking_stability.png",
+        title=f"{name}: Ranking Stability (Simulated Routing)",
+    )
+
     # Summary table
     create_simulation_summary_table(
         aggregated,
@@ -165,10 +174,9 @@ def run_full_simulation_experiment():
     print("Experiment 5b: Robustness Comparison Under Simulated Polis Routing")
     print("=" * 60)
 
-    # Configuration - reduced for speed
-    n_trials = 15  # Reduced for faster results
+    # Configuration
+    n_trials = 30
     base_seed = 42
-    max_datasets = 2  # Only run on first 2 datasets for speed
 
     # Output directories
     experiment_dir = Path(__file__).parent
@@ -181,9 +189,6 @@ def run_full_simulation_experiment():
         print("ERROR: No data files found!")
         return
 
-    # Limit datasets for speed
-    data_files = data_files[:max_datasets]
-
     print(f"Running on {len(data_files)} dataset(s)")
     print(f"Trials per observation rate: {n_trials}")
     print(f"Base seed: {base_seed}")
@@ -191,7 +196,7 @@ def run_full_simulation_experiment():
     # Run experiments
     all_results = {}
 
-    for data_path in data_files:
+    for data_path in tqdm(data_files, desc="Datasets (Simulated)"):
         result = run_single_dataset_simulation(
             data_path,
             n_trials=n_trials,
@@ -238,6 +243,12 @@ def run_full_simulation_experiment():
         title="Combined: Robustness Under Simulated Routing",
     )
 
+    plot_simulation_ranking_stability(
+        combined,
+        plots_dir / "combined_simulated_ranking_stability.png",
+        title="Combined: Ranking Stability (Simulated Routing)",
+    )
+
     create_simulation_summary_table(
         combined,
         plots_dir / "combined_simulated_summary.md",
@@ -277,6 +288,9 @@ def _combine_simulation_results(all_results: dict) -> dict:
         "spearman_mean", "spearman_std", "rmse_mean", "rmse_std",
         "mae_mean", "mae_std", "mean_estimate_variance",
         "observation_rate_mean", "observation_rate_std",
+        # Ranking stability metrics
+        "stability_top_1_frequency", "stability_rank_correlation_mean",
+        "stability_top_1_jaccard", "stability_top_3_jaccard", "stability_top_5_jaccard",
     ]
 
     for dist in distribution_names:

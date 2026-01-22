@@ -121,23 +121,30 @@ def print_results(name, results):
 def main():
     base_dir = Path(__file__).parent.parent
 
-    # French Election
-    french_files = sorted(glob(str(base_dir / 'data/processed/preflib/00026-*.npz')))
-    french_results = compute_all_correlations(french_files)
-
-    # Pol.is
-    polis_files = sorted(glob(str(base_dir / 'data/completed/00069-*.npz')))
-    polis_results = compute_all_correlations(polis_files)
+    # Define all data sources
+    datasets = [
+        ('French Election 2002 (00026)', 'data/processed/preflib/00026-*.npz'),
+        ('San Sebastian Poster (00033)', 'data/processed/preflib/00033-*.npz'),
+        ('CTU Tutorial (00063)', 'data/processed/preflib/00063-*.npz'),
+        ('French Election 2007 (00071)', 'data/processed/preflib/00071-*.npz'),
+        ('Pol.is (00069)', 'data/completed/00069-*.npz'),
+    ]
 
     print("=" * 55)
     print("Correlations: Approval, Diversity, and PD Bridging Score")
     print("=" * 55)
     print()
 
-    print_results("French Election (00026)", french_results)
-    print("-" * 55)
-    print()
-    print_results("Pol.is (00069)", polis_results)
+    for name, pattern in datasets:
+        files = sorted(glob(str(base_dir / pattern)))
+        if not files:
+            print(f"{name}: No files found")
+            print()
+            continue
+        results = compute_all_correlations(files)
+        print_results(name, results)
+        print("-" * 55)
+        print()
 
 
 if __name__ == '__main__':

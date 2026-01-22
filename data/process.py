@@ -182,7 +182,7 @@ def save_matrix(matrix: np.ndarray, metadata: dict, dest_path: Path) -> None:
     np.savez(dest_path, matrix=matrix, **metadata)
 
 
-def process(datasets: list[str] | None = None) -> dict[str, bool]:
+def process(datasets=None):
     """Process all downloaded PrefLib datasets.
 
     Args:

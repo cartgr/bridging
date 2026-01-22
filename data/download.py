@@ -14,12 +14,17 @@ from tqdm import tqdm
 DATA_DIR = Path(__file__).parent
 RAW_DIR = DATA_DIR / "raw" / "preflib"
 
-# Default PrefLib datasets: mapping dataset_id -> (folder_name, file_count)
+# Default PrefLib datasets: mapping dataset_id -> (folder_name, file_range)
 # folder_name is the name used in the PrefLib-Data GitHub repo
+# file_range is (start, end) inclusive for the file numbers
 DEFAULT_DATASETS = {
-    "00026": ("frenchapproval", 6),   # French Election 2002 Approval (6 districts)
-    "00069": ("polis", 20),           # Pol.is conversations (20 polls)
+    "00026": ("frenchapproval", (1, 6)),       # French Election 2002 Approval (6 districts)
+    "00033": ("poster", (2, 3)),               # San Sebastian Poster Competition (.cat files 2-3)
+    "00063": ("ctu", (1, 1)),                  # CTU AG1 Tutorial Time Selection (1 file)
+    "00069": ("polis", (1, 20)),               # Pol.is conversations (20 polls)
+    "00071": ("french-approval-2007", (1, 12)),# French Presidential Election 2007 (12 files)
 }
+# Note: 00027 (frenchrate) and 00029 (frenchratecombi) only have .toc/.dat files, not .cat
 
 # PrefLib GitHub raw content base URL
 PREFLIB_GITHUB_BASE = "https://raw.githubusercontent.com/PrefLib/PrefLib-Data/main/datasets"
@@ -52,13 +57,14 @@ def download_file(url: str, dest_path: Path, skip_existing: bool = True) -> bool
 
 
 def download(
-    datasets: dict[str, tuple[str, int]] | None = None,
+    datasets=None,
     skip_existing: bool = True,
-) -> dict[str, bool]:
+):
     """Download PrefLib categorical datasets from GitHub.
 
     Args:
-        datasets: Dict mapping dataset_id -> (folder_name, file_count).
+        datasets: Dict mapping dataset_id -> (folder_name, file_range).
+                  file_range is (start, end) inclusive.
                   If None, uses DEFAULT_DATASETS.
         skip_existing: If True, skip files that already exist.
 
@@ -71,15 +77,16 @@ def download(
     results = {}
     print("Downloading PrefLib datasets...")
 
-    for dataset_id, (folder_name, file_count) in tqdm(datasets.items(), desc="PrefLib"):
+    for dataset_id, (folder_name, file_range) in tqdm(datasets.items(), desc="PrefLib"):
         dest_dir = RAW_DIR / dataset_id
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         # URL pattern: {base}/{dataset_id} - {folder_name}/{dataset_id}-{number}.cat
         folder_path = f"{dataset_id} - {folder_name}"
 
+        start, end = file_range
         any_success = False
-        for i in range(1, file_count + 1):
+        for i in range(start, end + 1):
             filename = f"{dataset_id}-{i:08d}.cat"
             url = f"{PREFLIB_GITHUB_BASE}/{folder_path}/{filename}"
             dest_path = dest_dir / filename

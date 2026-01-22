@@ -460,7 +460,7 @@ def compute_inclusion_probability(
     priorities: np.ndarray,
     eligible_mask: np.ndarray,
     k_votes: int,
-    n_samples: int = 2000,
+    n_samples: int = 500,
 ) -> np.ndarray:
     """
     Estimate inclusion probability for PPS sampling without replacement via Monte Carlo.
