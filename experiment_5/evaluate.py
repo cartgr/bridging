@@ -250,10 +250,19 @@ def _empty_metrics(k_values: List[int]) -> Dict:
         "mae_std": np.nan,
         "estimate_variance_per_item": [],
         "mean_estimate_variance": np.nan,
+        # Stability metrics
+        "stability_n_trials": 0,
+        "stability_top_1_most_common": -1,
+        "stability_top_1_frequency": np.nan,
+        "stability_top_1_entropy": np.nan,
+        "stability_top_1_unique_count": 0,
+        "stability_rank_correlation_mean": np.nan,
+        "stability_rank_correlation_std": np.nan,
     }
     for k in k_values:
         result[f"top_{k}_precision_mean"] = np.nan
         result[f"top_{k}_precision_std"] = np.nan
+        result[f"stability_top_{k}_jaccard"] = np.nan
     return result
 
 
@@ -262,16 +271,17 @@ def aggregate_by_mask_rate(
     k_values: List[int] = [1, 3, 5],
 ) -> Dict:
     """
-    Aggregate metrics by mask rate for both methods.
+    Aggregate metrics by mask rate for all methods.
 
     Args:
         experiment_results: output from run_masking_experiment
         k_values: k values for top-k metrics
 
     Returns:
-        Dict with aggregated metrics for bridging and polis at each mask rate
+        Dict with aggregated metrics for bridging, pnorm, and polis at each mask rate
     """
     gt_bridging = experiment_results["gt_bridging"]
+    gt_pnorm = experiment_results.get("gt_pnorm")
     gt_polis = experiment_results["gt_polis"]
     results = experiment_results["results"]
     mask_rates = experiment_results["mask_rates"]
@@ -279,6 +289,7 @@ def aggregate_by_mask_rate(
     aggregated = {
         "mask_rates": mask_rates,
         "bridging": {},
+        "pnorm": {},
         "polis": {},
     }
 
@@ -287,6 +298,7 @@ def aggregate_by_mask_rate(
 
         # Extract estimates
         bridging_estimates = [t["bridging_scores"] for t in trials]
+        pnorm_estimates = [t.get("pnorm_scores") for t in trials if t.get("pnorm_scores") is not None]
         polis_estimates = [t["polis_scores"] for t in trials]
 
         # Compute metrics (vs ground truth)
@@ -296,6 +308,17 @@ def aggregate_by_mask_rate(
         polis_metrics = compute_robustness_metrics(
             gt_polis, polis_estimates, k_values
         )
+
+        # Compute p-norm metrics if available
+        if gt_pnorm is not None and pnorm_estimates:
+            pnorm_metrics = compute_robustness_metrics(
+                gt_pnorm, pnorm_estimates, k_values
+            )
+            pnorm_stability = compute_ranking_stability(pnorm_estimates, k_values)
+            for key, val in pnorm_stability.items():
+                pnorm_metrics[f"stability_{key}"] = val
+        else:
+            pnorm_metrics = _empty_metrics(k_values)
 
         # Compute ranking stability (across trials)
         bridging_stability = compute_ranking_stability(bridging_estimates, k_values)
@@ -310,6 +333,7 @@ def aggregate_by_mask_rate(
         # Add actual mask rate info
         actual_rates = [t["actual_mask_rate"] for t in trials]
         bridging_metrics["actual_mask_rate_mean"] = np.mean(actual_rates)
+        pnorm_metrics["actual_mask_rate_mean"] = np.mean(actual_rates)
         polis_metrics["actual_mask_rate_mean"] = np.mean(actual_rates)
 
         # Add polis k stats
@@ -319,6 +343,7 @@ def aggregate_by_mask_rate(
         polis_metrics["k_values"] = polis_ks
 
         aggregated["bridging"][mask_rate] = bridging_metrics
+        aggregated["pnorm"][mask_rate] = pnorm_metrics
         aggregated["polis"][mask_rate] = polis_metrics
 
     return aggregated
@@ -336,39 +361,36 @@ def compute_summary_statistics(aggregated: Dict) -> Dict:
     """
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
 
     summary = {
         "mask_rates": mask_rates,
         "bridging_wins_spearman": 0,
+        "pnorm_wins_spearman": 0,
         "polis_wins_spearman": 0,
         "ties_spearman": 0,
-        "bridging_wins_rmse": 0,
-        "polis_wins_rmse": 0,
-        "ties_rmse": 0,
     }
 
     for rate in mask_rates:
         b_spearman = bridging[rate]["spearman_mean"]
+        pn_spearman = pnorm.get(rate, {}).get("spearman_mean", np.nan)
         p_spearman = polis[rate]["spearman_mean"]
-        b_rmse = bridging[rate]["rmse_mean"]
-        p_rmse = polis[rate]["rmse_mean"]
 
-        # Spearman (higher is better)
-        if b_spearman > p_spearman + 0.01:
-            summary["bridging_wins_spearman"] += 1
-        elif p_spearman > b_spearman + 0.01:
-            summary["polis_wins_spearman"] += 1
-        else:
-            summary["ties_spearman"] += 1
-
-        # RMSE (lower is better)
-        if b_rmse < p_rmse - 0.001:
-            summary["bridging_wins_rmse"] += 1
-        elif p_rmse < b_rmse - 0.001:
-            summary["polis_wins_rmse"] += 1
-        else:
-            summary["ties_rmse"] += 1
+        # Find winner (higher is better)
+        scores = [
+            ("bridging", b_spearman),
+            ("pnorm", pn_spearman),
+            ("polis", p_spearman),
+        ]
+        scores = [(name, s) for name, s in scores if not np.isnan(s)]
+        if scores:
+            scores.sort(key=lambda x: -x[1])
+            winner = scores[0][0]
+            if len(scores) > 1 and scores[0][1] - scores[1][1] < 0.01:
+                summary["ties_spearman"] += 1
+            else:
+                summary[f"{winner}_wins_spearman"] += 1
 
     # Average metrics at different sparsity levels
     low_mask = [r for r in mask_rates if r <= 0.3]
@@ -380,6 +402,10 @@ def compute_summary_statistics(aggregated: Dict) -> Dict:
             summary[f"bridging_spearman_{label}"] = np.mean(
                 [bridging[r]["spearman_mean"] for r in rates]
             )
+            if pnorm:
+                summary[f"pnorm_spearman_{label}"] = np.mean(
+                    [pnorm[r]["spearman_mean"] for r in rates if r in pnorm]
+                )
             summary[f"polis_spearman_{label}"] = np.mean(
                 [polis[r]["spearman_mean"] for r in rates]
             )

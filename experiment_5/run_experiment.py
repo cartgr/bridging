@@ -284,11 +284,13 @@ def _combine_aggregations(all_results: dict, mask_rates: list[float]) -> dict:
     combined = {
         "mask_rates": mask_rates,
         "bridging": {},
+        "pnorm": {},
         "polis": {},
     }
 
     for mask_rate in mask_rates:
         bridging_metrics = {}
+        pnorm_metrics = {}
         polis_metrics = {}
 
         for key in ["spearman_mean", "spearman_std", "rmse_mean", "rmse_std",
@@ -300,16 +302,20 @@ def _combine_aggregations(all_results: dict, mask_rates: list[float]) -> dict:
                     "stability_top_1_frequency", "stability_rank_correlation_mean",
                     "stability_top_1_jaccard", "stability_top_3_jaccard", "stability_top_5_jaccard"]:
             b_vals = []
+            pn_vals = []
             p_vals = []
             for r in all_results.values():
                 agg = r["aggregated"]
                 if mask_rate in agg["bridging"]:
                     if key in agg["bridging"][mask_rate]:
                         b_vals.append(agg["bridging"][mask_rate][key])
+                    if "pnorm" in agg and mask_rate in agg["pnorm"] and key in agg["pnorm"][mask_rate]:
+                        pn_vals.append(agg["pnorm"][mask_rate][key])
                     if key in agg["polis"][mask_rate]:
                         p_vals.append(agg["polis"][mask_rate][key])
 
             bridging_metrics[key] = np.mean(b_vals) if b_vals else np.nan
+            pnorm_metrics[key] = np.mean(pn_vals) if pn_vals else np.nan
             polis_metrics[key] = np.mean(p_vals) if p_vals else np.nan
 
         # Handle k stats for polis
@@ -321,6 +327,7 @@ def _combine_aggregations(all_results: dict, mask_rates: list[float]) -> dict:
         polis_metrics["k_mean"] = np.mean(k_vals) if k_vals else np.nan
 
         combined["bridging"][mask_rate] = bridging_metrics
+        combined["pnorm"][mask_rate] = pnorm_metrics
         combined["polis"][mask_rate] = polis_metrics
 
     return combined

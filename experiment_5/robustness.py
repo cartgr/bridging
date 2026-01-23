@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_2.bridging import compute_bridging_scores_vectorized, compute_bridging_pnorm
 from experiment_5.polis import polis_consensus_pipeline
 from experiment_5.masking import apply_random_mask, generate_trial_seeds
 
@@ -25,10 +25,11 @@ def run_single_trial(
     seed: int,
     gt_bridging: np.ndarray,
     gt_polis: np.ndarray,
+    gt_pnorm: np.ndarray,
     polis_max_k: int = 5,
 ) -> Dict:
     """
-    Run one masking trial and compute both estimators.
+    Run one masking trial and compute all estimators.
 
     Args:
         ground_truth_matrix: (n_items, n_voters) fully observed matrix
@@ -36,11 +37,13 @@ def run_single_trial(
         seed: random seed for this trial
         gt_bridging: (n_items,) ground truth bridging scores
         gt_polis: (n_items,) ground truth polis scores
+        gt_pnorm: (n_items,) ground truth p-norm scores
         polis_max_k: max clusters for Polis k-means
 
     Returns:
         Dict containing:
         - bridging_scores: estimated bridging scores
+        - pnorm_scores: estimated p-norm scores
         - polis_scores: estimated polis scores
         - actual_mask_rate: actual fraction masked (after constraints)
         - polis_metadata: metadata from polis pipeline
@@ -63,6 +66,9 @@ def run_single_trial(
     # The naive approach computes bridging on observed approvers only
     bridging_scores = _compute_bridging_on_masked(masked_matrix, observed_mask)
 
+    # Compute p-norm (p=-10) scores on masked data
+    pnorm_scores = _compute_pnorm_on_masked(masked_matrix, observed_mask, p=-10)
+
     # Compute Polis consensus on masked data
     polis_scores, polis_metadata = polis_consensus_pipeline(
         masked_matrix,
@@ -74,6 +80,7 @@ def run_single_trial(
 
     return {
         "bridging_scores": bridging_scores,
+        "pnorm_scores": pnorm_scores,
         "polis_scores": polis_scores,
         "actual_mask_rate": actual_mask_rate,
         "polis_k": polis_metadata["k_clusters"],
@@ -157,6 +164,115 @@ def _compute_bridging_on_masked(
     return bridging_scores
 
 
+def _compute_pnorm_on_masked(
+    masked_matrix: np.ndarray,
+    observed_mask: np.ndarray,
+    p: float = -10,
+) -> np.ndarray:
+    """
+    Compute p-norm bridging scores on masked data (NaN-aware).
+
+    For each pair (c, c'), only consider voters who observed BOTH c and c'.
+
+    b_p(c) = (1/|C-1|) × Σ_{c' ≠ c} (w_{c'} × a_1^p + (1-w_{c'}) × a_2^p)^(1/p)
+
+    Where:
+    - w_{c'} = approval rate of c' among voters who observed c'
+    - a_1 = approval of c among approvers of c' (observed both)
+    - a_2 = approval of c among disapprovers of c' (observed both)
+
+    Args:
+        masked_matrix: (n_items, n_voters) with NaN for missing
+        observed_mask: (n_items, n_voters) boolean
+        p: p-norm parameter
+
+    Returns:
+        (n_items,) p-norm scores
+    """
+    n_items, n_voters = masked_matrix.shape
+
+    # Replace NaN with 0 for computation but track observations
+    matrix_filled = np.where(observed_mask, masked_matrix, 0.0)
+
+    # w[c'] = approval rate of c' among those who observed c'
+    n_observed = observed_mask.sum(axis=1)  # (n_items,)
+    n_approve = (matrix_filled * observed_mask).sum(axis=1)  # (n_items,)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        w = n_approve / n_observed
+        w = np.nan_to_num(w, nan=0.5)  # Default to 0.5 if no observations
+
+    # For each (c, c') pair, compute a_1 and a_2
+    # Only count voters who observed BOTH c and c'
+    scores = np.zeros(n_items)
+
+    for c in range(n_items):
+        total = 0.0
+        count = 0
+
+        for cp in range(n_items):
+            if cp == c:
+                continue
+
+            # Voters who observed both c and c'
+            both_observed = observed_mask[c, :] & observed_mask[cp, :]
+            n_both = both_observed.sum()
+
+            if n_both < 2:
+                continue
+
+            # Among voters who observed both:
+            # - Approvers of c' who approve c
+            # - Approvers of c' who disapprove c
+            # - Disapprovers of c' who approve c
+            # - Disapprovers of c' who disapprove c
+
+            approvers_cp = both_observed & (masked_matrix[cp, :] == 1.0)
+            disapprovers_cp = both_observed & (masked_matrix[cp, :] == 0.0)
+
+            n_approvers_cp = approvers_cp.sum()
+            n_disapprovers_cp = disapprovers_cp.sum()
+
+            if n_approvers_cp == 0 or n_disapprovers_cp == 0:
+                continue
+
+            # a_1 = approval of c among approvers of c'
+            # Use indexing to avoid NaN * False = NaN issue
+            a_1 = masked_matrix[c, approvers_cp].sum() / n_approvers_cp
+            # a_2 = approval of c among disapprovers of c'
+            a_2 = masked_matrix[c, disapprovers_cp].sum() / n_disapprovers_cp
+
+            # Weight for this c' (approval rate of c' among those who observed both)
+            w_cp = n_approvers_cp / n_both
+
+            # Compute p-norm term
+            if p == float('inf'):
+                term = max(a_1, a_2)
+            elif p == float('-inf'):
+                term = min(a_1, a_2)
+            elif p == 0:
+                # Geometric mean
+                if a_1 > 0 and a_2 > 0:
+                    term = (a_1 ** w_cp) * (a_2 ** (1 - w_cp))
+                else:
+                    term = 0.0
+            elif p < 0:
+                # For negative p, zeros cause issues
+                if a_1 > 0 and a_2 > 0:
+                    term = (w_cp * (a_1 ** p) + (1 - w_cp) * (a_2 ** p)) ** (1/p)
+                else:
+                    term = 0.0
+            else:
+                term = (w_cp * (a_1 ** p) + (1 - w_cp) * (a_2 ** p)) ** (1/p)
+
+            total += term
+            count += 1
+
+        if count > 0:
+            scores[c] = total / count
+
+    return scores
+
+
 def run_masking_experiment(
     matrix: np.ndarray,
     mask_rates: List[float],
@@ -189,6 +305,7 @@ def run_masking_experiment(
     # Compute ground truth scores on fully observed data
     full_mask = np.ones_like(matrix, dtype=bool)
     gt_bridging = compute_bridging_scores_vectorized(matrix)
+    gt_pnorm = compute_bridging_pnorm(matrix, p=-10)
     gt_polis, gt_metadata = polis_consensus_pipeline(
         matrix, full_mask, max_k=polis_max_k, seed=base_seed
     )
@@ -220,12 +337,14 @@ def run_masking_experiment(
                 seed,
                 gt_bridging,
                 gt_polis,
+                gt_pnorm,
                 polis_max_k=polis_max_k,
             )
             results[mask_rate].append(trial_result)
 
     return {
         "gt_bridging": gt_bridging,
+        "gt_pnorm": gt_pnorm,
         "gt_polis": gt_polis,
         "gt_polis_metadata": gt_metadata,
         "results": results,

@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from experiment_2.bridging import compute_bridging_scores_vectorized
+from experiment_2.bridging import compute_bridging_scores_vectorized, compute_bridging_pnorm
 from experiment_2.priority import (
     compute_priorities,
     compute_pca_extremeness,

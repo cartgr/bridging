@@ -17,7 +17,7 @@ def plot_robustness_comparison(
     figsize: tuple = (10, 6),
 ) -> None:
     """
-    Plot metric vs mask rate for both methods with error bands.
+    Plot metric vs mask rate for all methods with error bands.
 
     Args:
         aggregated: output from aggregate_by_mask_rate
@@ -28,6 +28,7 @@ def plot_robustness_comparison(
     """
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
 
     # Extract metric values
@@ -41,15 +42,29 @@ def plot_robustness_comparison(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Plot bridging
-    ax.plot(obs_rates, bridging_means, "b-", label="Bridging Score", linewidth=2)
+    # Plot bridging (PD)
+    ax.plot(obs_rates, bridging_means, "b-", label="PD Bridging", linewidth=2)
     ax.fill_between(
         obs_rates,
         np.array(bridging_means) - np.array(bridging_stds),
         np.array(bridging_means) + np.array(bridging_stds),
         color="blue",
-        alpha=0.2,
+        alpha=0.15,
     )
+
+    # Plot p-norm if available
+    if pnorm:
+        pnorm_means = [pnorm[r].get(f"{metric}_mean", np.nan) for r in mask_rates]
+        pnorm_stds = [pnorm[r].get(f"{metric}_std", 0) for r in mask_rates]
+        if not all(np.isnan(pnorm_means)):
+            ax.plot(obs_rates, pnorm_means, "g-", label="p-norm (p=-10)", linewidth=2)
+            ax.fill_between(
+                obs_rates,
+                np.array(pnorm_means) - np.array(pnorm_stds),
+                np.array(pnorm_means) + np.array(pnorm_stds),
+                color="green",
+                alpha=0.15,
+            )
 
     # Plot polis
     ax.plot(obs_rates, polis_means, "r-", label="Polis Consensus", linewidth=2)
@@ -58,7 +73,7 @@ def plot_robustness_comparison(
         np.array(polis_means) - np.array(polis_stds),
         np.array(polis_means) + np.array(polis_stds),
         color="red",
-        alpha=0.2,
+        alpha=0.15,
     )
 
     # Labels and formatting
@@ -96,7 +111,7 @@ def plot_variance_comparison(
     figsize: tuple = (10, 6),
 ) -> None:
     """
-    Plot estimate variance vs mask rate for both methods.
+    Plot estimate variance vs mask rate for all methods.
 
     Args:
         aggregated: output from aggregate_by_mask_rate
@@ -106,6 +121,7 @@ def plot_variance_comparison(
     """
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
 
     # Extract variance values
@@ -116,7 +132,14 @@ def plot_variance_comparison(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    ax.plot(obs_rates, bridging_vars, "b-o", label="Bridging Score", linewidth=2)
+    ax.plot(obs_rates, bridging_vars, "b-o", label="PD Bridging", linewidth=2)
+
+    # Plot p-norm if available
+    if pnorm:
+        pnorm_vars = [pnorm[r].get("mean_estimate_variance", np.nan) for r in mask_rates]
+        if not all(np.isnan(pnorm_vars)):
+            ax.plot(obs_rates, pnorm_vars, "g-o", label="p-norm (p=-10)", linewidth=2)
+
     ax.plot(obs_rates, polis_vars, "r-o", label="Polis Consensus", linewidth=2)
 
     ax.set_xlabel("Observation Rate", fontsize=12)
@@ -205,6 +228,7 @@ def plot_multi_metric(
 
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
     obs_rates = [1 - r for r in mask_rates]
 
@@ -222,14 +246,28 @@ def plot_multi_metric(
         polis_means = [polis[r][f"{metric}_mean"] for r in mask_rates]
         polis_stds = [polis[r][f"{metric}_std"] for r in mask_rates]
 
-        ax.plot(obs_rates, bridging_means, "b-", label="Bridging Score", linewidth=2)
+        ax.plot(obs_rates, bridging_means, "b-", label="PD Bridging", linewidth=2)
         ax.fill_between(
             obs_rates,
             np.array(bridging_means) - np.array(bridging_stds),
             np.array(bridging_means) + np.array(bridging_stds),
             color="blue",
-            alpha=0.2,
+            alpha=0.15,
         )
+
+        # Plot p-norm if available
+        if pnorm:
+            pnorm_means = [pnorm[r].get(f"{metric}_mean", np.nan) for r in mask_rates]
+            pnorm_stds = [pnorm[r].get(f"{metric}_std", 0) for r in mask_rates]
+            if not all(np.isnan(pnorm_means)):
+                ax.plot(obs_rates, pnorm_means, "g-", label="p-norm (p=-10)", linewidth=2)
+                ax.fill_between(
+                    obs_rates,
+                    np.array(pnorm_means) - np.array(pnorm_stds),
+                    np.array(pnorm_means) + np.array(pnorm_stds),
+                    color="green",
+                    alpha=0.15,
+                )
 
         ax.plot(obs_rates, polis_means, "r-", label="Polis Consensus", linewidth=2)
         ax.fill_between(
@@ -237,7 +275,7 @@ def plot_multi_metric(
             np.array(polis_means) - np.array(polis_stds),
             np.array(polis_means) + np.array(polis_stds),
             color="red",
-            alpha=0.2,
+            alpha=0.15,
         )
 
         ax.set_xlabel("Observation Rate", fontsize=11)
@@ -271,16 +309,31 @@ def create_summary_table(
     """
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
 
-    lines = [
-        "# Robustness Comparison: Bridging Score vs Polis Consensus",
-        "",
-        "## Results by Observation Rate",
-        "",
-        "| Obs Rate | Bridging Spearman | Polis Spearman | Bridging RMSE | Polis RMSE | Polis k |",
-        "|----------|-------------------|----------------|---------------|------------|---------|",
-    ]
+    has_pnorm = bool(pnorm) and any(
+        not np.isnan(pnorm[r].get("spearman_mean", np.nan)) for r in mask_rates
+    )
+
+    if has_pnorm:
+        lines = [
+            "# Robustness Comparison: PD Bridging vs p-norm vs Polis Consensus",
+            "",
+            "## Results by Observation Rate",
+            "",
+            "| Obs Rate | PD Spearman | p-norm Spearman | Polis Spearman | PD RMSE | p-norm RMSE | Polis RMSE | Polis k |",
+            "|----------|-------------|-----------------|----------------|---------|-------------|------------|---------|",
+        ]
+    else:
+        lines = [
+            "# Robustness Comparison: PD Bridging vs Polis Consensus",
+            "",
+            "## Results by Observation Rate",
+            "",
+            "| Obs Rate | PD Spearman | Polis Spearman | PD RMSE | Polis RMSE | Polis k |",
+            "|----------|-------------|----------------|---------|------------|---------|",
+        ]
 
     for mask_rate in mask_rates:
         obs_rate = 1 - mask_rate
@@ -292,11 +345,22 @@ def create_summary_table(
         p_rmse = polis[mask_rate]["rmse_mean"]
         p_k = polis[mask_rate]["k_mean"]
 
-        lines.append(
-            f"| {obs_rate:.0%} | {b_spearman:.3f} ({b_spearman_std:.3f}) | "
-            f"{p_spearman:.3f} ({p_spearman_std:.3f}) | {b_rmse:.4f} | "
-            f"{p_rmse:.4f} | {p_k:.1f} |"
-        )
+        if has_pnorm:
+            pn_spearman = pnorm[mask_rate].get("spearman_mean", np.nan)
+            pn_spearman_std = pnorm[mask_rate].get("spearman_std", np.nan)
+            pn_rmse = pnorm[mask_rate].get("rmse_mean", np.nan)
+            lines.append(
+                f"| {obs_rate:.0%} | {b_spearman:.3f} ({b_spearman_std:.3f}) | "
+                f"{pn_spearman:.3f} ({pn_spearman_std:.3f}) | "
+                f"{p_spearman:.3f} ({p_spearman_std:.3f}) | {b_rmse:.4f} | "
+                f"{pn_rmse:.4f} | {p_rmse:.4f} | {p_k:.1f} |"
+            )
+        else:
+            lines.append(
+                f"| {obs_rate:.0%} | {b_spearman:.3f} ({b_spearman_std:.3f}) | "
+                f"{p_spearman:.3f} ({p_spearman_std:.3f}) | {b_rmse:.4f} | "
+                f"{p_rmse:.4f} | {p_k:.1f} |"
+            )
 
     lines.extend([
         "",
@@ -335,6 +399,7 @@ def plot_top_k_precision(
     """
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
 
     bridging_means = [bridging[r][f"top_{k}_precision_mean"] for r in mask_rates]
@@ -346,14 +411,28 @@ def plot_top_k_precision(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    ax.plot(obs_rates, bridging_means, "b-o", label="Bridging Score", linewidth=2)
+    ax.plot(obs_rates, bridging_means, "b-o", label="PD Bridging", linewidth=2)
     ax.fill_between(
         obs_rates,
         np.array(bridging_means) - np.array(bridging_stds),
         np.array(bridging_means) + np.array(bridging_stds),
         color="blue",
-        alpha=0.2,
+        alpha=0.15,
     )
+
+    # Plot p-norm if available
+    if pnorm:
+        pnorm_means = [pnorm[r].get(f"top_{k}_precision_mean", np.nan) for r in mask_rates]
+        pnorm_stds = [pnorm[r].get(f"top_{k}_precision_std", 0) for r in mask_rates]
+        if not all(np.isnan(pnorm_means)):
+            ax.plot(obs_rates, pnorm_means, "g-o", label="p-norm (p=-10)", linewidth=2)
+            ax.fill_between(
+                obs_rates,
+                np.array(pnorm_means) - np.array(pnorm_stds),
+                np.array(pnorm_means) + np.array(pnorm_stds),
+                color="green",
+                alpha=0.15,
+            )
 
     ax.plot(obs_rates, polis_means, "r-o", label="Polis Consensus", linewidth=2)
     ax.fill_between(
@@ -361,7 +440,7 @@ def plot_top_k_precision(
         np.array(polis_means) - np.array(polis_stds),
         np.array(polis_means) + np.array(polis_stds),
         color="red",
-        alpha=0.2,
+        alpha=0.15,
     )
 
     ax.set_xlabel("Observation Rate", fontsize=12)
@@ -591,6 +670,7 @@ def plot_ranking_stability(
     """
     mask_rates = aggregated["mask_rates"]
     bridging = aggregated["bridging"]
+    pnorm = aggregated.get("pnorm", {})
     polis = aggregated["polis"]
     obs_rates = [1 - r for r in mask_rates]
 
@@ -601,7 +681,16 @@ def plot_ranking_stability(
     bridging_top1 = [bridging[r].get("stability_top_1_frequency", np.nan) for r in mask_rates]
     polis_top1 = [polis[r].get("stability_top_1_frequency", np.nan) for r in mask_rates]
 
-    ax.plot(obs_rates, bridging_top1, "b-o", label="Bridging Score", linewidth=2)
+    ax.plot(obs_rates, bridging_top1, "b-o", label="PD Bridging", linewidth=2)
+
+    # Plot p-norm if available
+    if pnorm:
+        pnorm_top1 = [pnorm[r].get("stability_top_1_frequency", np.nan) for r in mask_rates]
+        # Only skip if all values are NaN (use np.all for proper array handling)
+        pnorm_top1_arr = np.array(pnorm_top1)
+        if not np.all(np.isnan(pnorm_top1_arr)):
+            ax.plot(obs_rates, pnorm_top1, "g-o", label="p-norm (p=-10)", linewidth=2)
+
     ax.plot(obs_rates, polis_top1, "r-o", label="Polis Consensus", linewidth=2)
 
     ax.set_xlabel("Observation Rate", fontsize=11)
@@ -617,7 +706,16 @@ def plot_ranking_stability(
     bridging_corr = [bridging[r].get("stability_rank_correlation_mean", np.nan) for r in mask_rates]
     polis_corr = [polis[r].get("stability_rank_correlation_mean", np.nan) for r in mask_rates]
 
-    ax.plot(obs_rates, bridging_corr, "b-o", label="Bridging Score", linewidth=2)
+    ax.plot(obs_rates, bridging_corr, "b-o", label="PD Bridging", linewidth=2)
+
+    # Plot p-norm if available
+    if pnorm:
+        pnorm_corr = [pnorm[r].get("stability_rank_correlation_mean", np.nan) for r in mask_rates]
+        # Only skip if all values are NaN (use np.all for proper array handling)
+        pnorm_corr_arr = np.array(pnorm_corr)
+        if not np.all(np.isnan(pnorm_corr_arr)):
+            ax.plot(obs_rates, pnorm_corr, "g-o", label="p-norm (p=-10)", linewidth=2)
+
     ax.plot(obs_rates, polis_corr, "r-o", label="Polis Consensus", linewidth=2)
 
     ax.set_xlabel("Observation Rate", fontsize=11)
