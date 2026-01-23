@@ -276,6 +276,64 @@ def compute_bridging_pnorm(matrix: np.ndarray, p: float = 2.0) -> np.ndarray:
     return scores
 
 
+def compute_pairwise_voting_scores(matrix: np.ndarray) -> dict:
+    """
+    Compute Vitalik-style pairwise voting scores.
+
+    For each pair of voters (i, j):
+    - They get 1 vote total
+    - Split evenly among items where they agree (both approve or both disapprove)
+    - Agreement on approval contributes to approval_score
+    - Agreement on disapproval contributes to disapproval_score
+
+    Items with high approval_scores are "bridging" - they get support from
+    voters who rarely agree on other things.
+
+    Args:
+        matrix: (n_items, n_voters) array with values 0.0 or 1.0
+
+    Returns:
+        Dict with:
+        - approval_scores: (n_items,) total weighted approval
+        - disapproval_scores: (n_items,) total weighted disapproval
+        - net_scores: approval - disapproval
+    """
+    n_items, n_voters = matrix.shape
+
+    # Convert to boolean
+    approves = matrix.astype(bool)  # (n_items, n_voters)
+
+    # Initialize scores
+    approval_scores = np.zeros(n_items)
+    disapproval_scores = np.zeros(n_items)
+
+    # Iterate over all pairs of voters
+    for i in range(n_voters):
+        for j in range(i + 1, n_voters):
+            # Find agreements
+            both_approve = approves[:, i] & approves[:, j]
+            both_disapprove = ~approves[:, i] & ~approves[:, j]
+
+            # Total agreements for this pair
+            n_agreements = both_approve.sum() + both_disapprove.sum()
+
+            if n_agreements == 0:
+                continue
+
+            # Weight per agreement
+            weight = 1.0 / n_agreements
+
+            # Add to scores
+            approval_scores[both_approve] += weight
+            disapproval_scores[both_disapprove] += weight
+
+    return {
+        "approval_scores": approval_scores,
+        "disapproval_scores": disapproval_scores,
+        "net_scores": approval_scores - disapproval_scores,
+    }
+
+
 def compute_bridging_harmonic_pd(matrix: np.ndarray) -> np.ndarray:
     """
     Compute Harmonic Pairwise Disagreement bridging score.

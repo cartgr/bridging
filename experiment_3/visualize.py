@@ -24,6 +24,7 @@ from experiment_2.bridging import (
     compute_bridging_scores_vectorized,
     compute_bridging_pnorm,
     compute_bridging_harmonic_pd,
+    compute_pairwise_voting_scores,
 )
 from experiment_5.polis import polis_consensus_pipeline
 
@@ -548,6 +549,7 @@ def process_dataset(
     # Compute all bridging metrics
     pd_bridging = compute_bridging_scores_vectorized(matrix)
     pnorm_min = compute_bridging_pnorm(matrix, p=-10)
+    pnorm_min_extreme = compute_bridging_pnorm(matrix, p=-1000)
     pnorm_geo = compute_bridging_pnorm(matrix, p=0)
     harmonic_pd = compute_bridging_harmonic_pd(matrix)
 
@@ -559,13 +561,21 @@ def process_dataset(
         print(f"    Polis failed: {e}")
         polis_scores = np.full(n_items, np.nan)
 
+    # Compute pairwise voting scores
+    pv_results = compute_pairwise_voting_scores(matrix)
+    pv_approval = pv_results["approval_scores"]
+    pv_disapproval = pv_results["disapproval_scores"]
+
     # All metrics to plot
     metrics = [
         ('pd_bridging', pd_bridging, 'PD Bridging'),
         ('pnorm_min', pnorm_min, 'p-norm (p=-10)'),
+        ('pnorm_min_extreme', pnorm_min_extreme, 'p-norm (p=-1000)'),
         ('pnorm_geo', pnorm_geo, 'p-norm (p=0)'),
         ('harmonic_pd', harmonic_pd, 'Harmonic PD'),
         ('polis', polis_scores, 'Polis'),
+        ('pairwise_approval', pv_approval, 'Pairwise Approval'),
+        ('pairwise_disapproval', pv_disapproval, 'Pairwise Disapproval'),
     ]
 
     # Generate item names if not provided
