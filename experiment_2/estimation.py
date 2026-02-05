@@ -413,7 +413,22 @@ def estimate_pnorm_naive(
     # Broadcast w to full (n_items, n_items) for boolean indexing
     w_cprime = np.broadcast_to(w, (n_items, n_items)).copy()
 
-    if p < 0:
+    if p == float('inf'):
+        # Max of a_1 and a_2
+        terms = np.maximum(a_1, a_2)
+    elif p == float('-inf'):
+        # Min of a_1 and a_2
+        terms = np.minimum(a_1, a_2)
+    elif p == 0:
+        # Geometric mean: a_1^w × a_2^(1-w)
+        # Handle zeros: if either is 0, term is 0
+        with np.errstate(divide='ignore', invalid='ignore'):
+            terms = np.where(
+                (a_1 > 0) & (a_2 > 0),
+                np.power(a_1, w_cprime) * np.power(a_2, 1 - w_cprime),
+                0.0
+            )
+    elif p < 0:
         # For negative p, a^p diverges if a=0, so term should be 0 when a_1=0 or a_2=0
         safe_a1 = np.where(a_1 > 0, a_1, 0.0)
         safe_a2 = np.where(a_2 > 0, a_2, 0.0)
