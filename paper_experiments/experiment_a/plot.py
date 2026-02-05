@@ -377,12 +377,12 @@ def plot_combined(all_results: dict, output_path: Path, top_n: int = 5):
 
     # Plot each dataset
     datasets = list(all_results.items())
-    panel_labels = ["(a)", "(b)"]
     titles = ["French Election 2002", "French Election 2007"]
 
     for idx, (dataset_id, data) in enumerate(datasets):
         ax = axes[idx]
         plot_ridgeline_on_ax(ax, data, top_n=top_n, fontscale=1.0)
+        ax.set_title(titles[idx], fontsize=9)
 
     plt.tight_layout()
 

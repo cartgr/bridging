@@ -30,7 +30,8 @@ def load_matrix(filepath):
 
 def compute_approval_rates(matrix):
     """Compute approval rate for each item."""
-    return np.mean(matrix, axis=1)
+    # Use explicit == 1.0 check so 0.5 (pass) values are not counted as approvals
+    return (matrix == 1.0).mean(axis=1)
 
 
 def compute_approver_diversity(matrix):
@@ -47,7 +48,8 @@ def compute_approver_diversity(matrix):
             continue
 
         approver_vectors = matrix[:, approvers]
-        k = np.sum(approver_vectors, axis=1)
+        # Count approvals (1.0) only, not passes (0.5)
+        k = np.sum(approver_vectors == 1.0, axis=1)
         total_disagreements = np.sum(k * (n - k))
         n_pairs = n * (n - 1) / 2
         diversity[i] = total_disagreements / (n_pairs * n_items)

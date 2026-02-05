@@ -3,7 +3,10 @@ Process raw PrefLib voting data into standardized numpy matrices.
 
 Matrix format:
 - Shape: (n_items, n_voters)
-- Values: 1.0 (approved), 0.0 (disapproved), np.nan (no response)
+- Values: 1.0 (approved), 0.0 (disapproved), 0.5 (pass/neutral), np.nan (unobserved)
+
+Note: Only Polis datasets (00069) have 3 categories with pass votes.
+      French election data (00026, 00071) remains binary (approve/disapprove only).
 
 Usage:
     python data/process.py  # Process all downloaded datasets
@@ -77,7 +80,7 @@ def process_cat_file(cat_path: Path) -> tuple[np.ndarray, dict]:
 
     Conversion (3 categories - Disapproved/Neutral/Approved):
     - Category 0 (Disapproved) -> 0.0
-    - Category 1 (Neutral/Skipped) -> np.nan
+    - Category 1 (Neutral/Pass) -> 0.5 (voter saw but chose not to vote)
     - Category 2 (Approved) -> 1.0
 
     Args:
@@ -149,15 +152,18 @@ def process_cat_file(cat_path: Path) -> tuple[np.ndarray, dict]:
                         matrix[item_id - 1, v] = 0.0
 
         elif n_categories == 3 and len(cat_parts) >= 3:
-            # 3-category: Disapproved (0.0), Neutral (nan), Approved (1.0)
+            # 3-category: Disapproved (0.0), Neutral/Pass (0.5), Approved (1.0)
             disapproved_items = _parse_item_set(cat_parts[0])
-            # neutral_items = _parse_item_set(cat_parts[1])  # stays NaN
+            neutral_items = _parse_item_set(cat_parts[1])  # pass votes -> 0.5
             approved_items = _parse_item_set(cat_parts[2])
 
             for v in range(voter_idx, min(voter_idx + count, n_voters)):
                 for item_id in disapproved_items:
                     if 0 <= item_id < n_items:  # 0-indexed for 3-cat
                         matrix[item_id, v] = 0.0
+                for item_id in neutral_items:
+                    if 0 <= item_id < n_items:  # 0-indexed for 3-cat
+                        matrix[item_id, v] = 0.5
                 for item_id in approved_items:
                     if 0 <= item_id < n_items:  # 0-indexed for 3-cat
                         matrix[item_id, v] = 1.0

@@ -123,10 +123,13 @@ def _compute_bridging_on_masked(
                 d_naive[j, i] = np.nan
                 continue
 
-            # Count disagreements
+            # Count disagreements (only 1.0 vs 0.0, skips don't disagree)
             votes_i = masked_matrix[both_observed, i]
             votes_j = masked_matrix[both_observed, j]
-            disagree_count = (votes_i != votes_j).sum()
+            disagree_count = (
+                ((votes_i == 1.0) & (votes_j == 0.0)) |
+                ((votes_i == 0.0) & (votes_j == 1.0))
+            ).sum()
 
             # Estimate disagreement rate
             d_naive[i, j] = disagree_count / n_both

@@ -39,12 +39,14 @@ def compute_approval_rates(matrix: np.ndarray) -> np.ndarray:
     Compute approval rate for each item (row).
 
     Args:
-        matrix: Shape (n_items, n_voters), values 1.0 (approved) or 0.0 (disapproved)
+        matrix: Shape (n_items, n_voters), values 1.0 (approved), 0.0 (disapproved),
+                0.5 (pass/neutral)
 
     Returns:
-        Array of approval rates for each item
+        Array of approval rates for each item (approvals / total votes)
     """
-    return np.mean(matrix, axis=1)
+    # Use explicit == 1.0 check so 0.5 (pass) values are not counted as approvals
+    return (matrix == 1.0).mean(axis=1)
 
 
 def compute_approver_diversity(matrix: np.ndarray, metric: str = 'hamming') -> np.ndarray:
@@ -83,8 +85,8 @@ def compute_approver_diversity(matrix: np.ndarray, metric: str = 'hamming') -> n
         # Get voting vectors for all approvers
         approver_vectors = matrix[:, approvers]  # shape: (n_items, n_approvers)
 
-        # Count 1s at each position
-        k = np.sum(approver_vectors, axis=1)  # shape: (n_items,)
+        # Count approvals (1.0) at each position, not passes (0.5)
+        k = np.sum(approver_vectors == 1.0, axis=1)  # shape: (n_items,)
 
         # Total disagreements: sum of k_j * (n - k_j) for each position j
         total_disagreements = np.sum(k * (n - k))

@@ -31,14 +31,14 @@ from experiment_5.polis import polis_consensus_pipeline
 
 # French election 2002 candidate names (00026)
 CANDIDATE_NAMES_2002 = [
-    'Megret', 'Lepage', 'Gluckstein', 'Bayrou', 'Chirac',
-    'LePen', 'Taubira', 'Saint-Josse', 'Mamere', 'Jospin',
-    'Boutin', 'Hue', 'Chevenement', 'Madelin', 'Laguiller', 'Besancenot'
+    'Mégret', 'Lepage', 'Gluckstein', 'Bayrou', 'Chirac',
+    'Le Pen', 'Taubira', 'Saint-Josse', 'Mamère', 'Jospin',
+    'Boutin', 'Hue', 'Chevènement', 'Madelin', 'Laguiller', 'Besancenot'
 ]
 
 # French election 2007 candidate names (00071)
 CANDIDATE_NAMES_2007 = [
-    'Besancenot', 'Buffet', 'Schivardi', 'Bayrou', 'Bove',
+    'Besancenot', 'Buffet', 'Schivardi', 'Bayrou', 'Bové',
     'Voynet', 'Villiers', 'Royal', 'Nihous', 'Le Pen',
     'Sarkozy', 'Laguiller'
 ]
@@ -637,8 +637,17 @@ def main():
 
     preflib_dir = base_dir / 'data' / 'processed' / 'preflib'
 
-    # Process French election 2002 files (00026)
-    french_2002_files = sorted(glob(str(preflib_dir / '00026-*.npz')))
+    # Process French election 2002 files (00026) - combined and individual
+    french_2002_combined = preflib_dir / '00026-combined.npz'
+    if french_2002_combined.exists():
+        print("Processing French Election 2002 (combined)...")
+        process_dataset(
+            french_2002_combined,
+            output_dir,
+            'French Election 2002 (Combined)',
+            item_names=CANDIDATE_NAMES_2002,
+        )
+    french_2002_files = sorted(glob(str(preflib_dir / '00026-0*.npz')))
     if french_2002_files:
         print(f"Processing {len(french_2002_files)} French Election 2002 files...")
         for filepath in french_2002_files:
@@ -673,7 +682,16 @@ def main():
                 item_names=None,  # Auto-generate
             )
 
-    # Process French election 2007 files (00071) - only fully observed ones (1-6)
+    # Process French election 2007 files (00071) - combined and individual (1-6)
+    french_2007_combined = preflib_dir / '00071-combined.npz'
+    if french_2007_combined.exists():
+        print("\nProcessing French Election 2007 (combined)...")
+        process_dataset(
+            french_2007_combined,
+            output_dir,
+            'French Election 2007 (Combined)',
+            item_names=CANDIDATE_NAMES_2007,
+        )
     french_2007_files = []
     for i in range(1, 7):
         f = preflib_dir / f'00071-{i:08d}.npz'
@@ -700,8 +718,17 @@ def main_histogram():
 
     preflib_dir = base_dir / 'data' / 'processed' / 'preflib'
 
-    # Process French election 2002 files (00026)
-    french_2002_files = sorted(glob(str(preflib_dir / '00026-*.npz')))
+    # Process French election 2002 files (00026) - combined and individual
+    french_2002_combined = preflib_dir / '00026-combined.npz'
+    if french_2002_combined.exists():
+        print("Processing French Election 2002 (combined)...")
+        process_dataset_histogram(
+            french_2002_combined,
+            output_dir,
+            'French Election 2002 (Combined)',
+            item_names=CANDIDATE_NAMES_2002,
+        )
+    french_2002_files = sorted(glob(str(preflib_dir / '00026-0*.npz')))
     if french_2002_files:
         print(f"Processing {len(french_2002_files)} French Election 2002 files...")
         for filepath in french_2002_files:
@@ -736,7 +763,16 @@ def main_histogram():
                 item_names=None,
             )
 
-    # Process French election 2007 files (00071) - only fully observed ones (1-6)
+    # Process French election 2007 files (00071) - combined and individual (1-6)
+    french_2007_combined = preflib_dir / '00071-combined.npz'
+    if french_2007_combined.exists():
+        print("\nProcessing French Election 2007 (combined)...")
+        process_dataset_histogram(
+            french_2007_combined,
+            output_dir,
+            'French Election 2007 (Combined)',
+            item_names=CANDIDATE_NAMES_2007,
+        )
     french_2007_files = []
     for i in range(1, 7):
         f = preflib_dir / f'00071-{i:08d}.npz'

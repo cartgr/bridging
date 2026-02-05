@@ -229,26 +229,26 @@ def compute_vote_stats(
     Compute vote statistics for each comment.
 
     Args:
-        matrix: (n_items, n_voters) array with actual vote values (0 or 1)
-                May contain NaN for unobserved entries.
+        matrix: (n_items, n_voters) array with actual vote values
+                1.0 (agree), 0.0 (disagree), 0.5 (pass), NaN (unobserved)
         observed_mask: (n_items, n_voters) boolean array, True where observed
 
     Returns:
         Tuple of:
         - n_votes: (n_items,) array of total vote counts per comment (S)
+                   This includes passes since voters "saw" the comment
         - n_agrees: (n_items,) array of agree counts per comment (A)
-        - n_passes: (n_items,) array of pass counts (always 0 in binary setting)
+        - n_passes: (n_items,) array of pass counts (P)
     """
-    # Count total votes per comment (S)
+    # Count total votes per comment (S) - includes passes
     n_votes = observed_mask.sum(axis=1).astype(float)
 
     # Count agrees (1s) per comment - only where observed (A)
-    # Replace NaN with 0 before multiplying to avoid NaN propagation
-    safe_matrix = np.nan_to_num(matrix, nan=0.0)
-    n_agrees = (safe_matrix * observed_mask).sum(axis=1)
+    # Use explicit == 1.0 check so 0.5 (pass) values are not counted as agrees
+    n_agrees = ((matrix == 1.0) & observed_mask).sum(axis=1).astype(float)
 
-    # In binary setting, there are no passes (P = 0)
-    n_passes = np.zeros_like(n_agrees)
+    # Count passes (0.5s) per comment (P)
+    n_passes = ((matrix == 0.5) & observed_mask).sum(axis=1).astype(float)
 
     return n_votes, n_agrees, n_passes
 

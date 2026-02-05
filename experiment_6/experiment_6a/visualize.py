@@ -129,8 +129,13 @@ def compute_bridging_naive_sparse(matrix: np.ndarray) -> np.ndarray:
                 if n_shared == 0:
                     continue
 
-                # Disagreement on shared items (compare actual values)
-                disagree = (matrix[shared, i] != matrix[shared, j]).sum()
+                # Disagreement on shared items (only 1.0 vs 0.0, skips don't disagree)
+                votes_i = matrix[shared, i]
+                votes_j = matrix[shared, j]
+                disagree = (
+                    ((votes_i == 1.0) & (votes_j == 0.0)) |
+                    ((votes_i == 0.0) & (votes_j == 1.0))
+                ).sum()
                 total_disagreement += disagree / n_shared
                 n_pairs += 1
 

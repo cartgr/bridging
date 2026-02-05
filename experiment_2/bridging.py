@@ -21,11 +21,14 @@ def compute_pairwise_disagreement(matrix: np.ndarray) -> np.ndarray:
     """
     Compute pairwise disagreement d_ij for all voter pairs.
 
-    d_ij = (1/|C|) × Σ_{c'∈C} 1[v_{i,c'} ≠ v_{j,c'}]
+    d_ij = (# comments where both voted 1.0/0.0 and disagree) / (# comments both saw)
+
+    Skips (0.5) are treated as "observed but no opinion":
+    - Numerator: Only counts 1.0 vs 0.0 as disagreement
+    - Denominator: All non-NaN observations (includes skips)
 
     Args:
-        matrix: (n_items, n_voters) array with values 0.0 or 1.0
-                (no NaN values allowed for ground truth computation)
+        matrix: (n_items, n_voters) array with values 0.0, 0.5, 1.0, or NaN
 
     Returns:
         (n_voters, n_voters) symmetric matrix where entry [i,j] is d_ij
@@ -35,14 +38,27 @@ def compute_pairwise_disagreement(matrix: np.ndarray) -> np.ndarray:
     # Transpose to (n_voters, n_items) for easier pairwise comparison
     votes = matrix.T  # (n_voters, n_items)
 
-    # Compute disagreement using broadcasting
-    # votes[:, None, :] has shape (n_voters, 1, n_items)
-    # votes[None, :, :] has shape (1, n_voters, n_items)
-    # Disagreement when votes differ
-    disagreements = (votes[:, None, :] != votes[None, :, :]).sum(axis=2)
+    # Masks for real votes (not skips, not NaN)
+    is_approve = (votes == 1.0)   # (n_voters, n_items)
+    is_disapprove = (votes == 0.0)  # (n_voters, n_items)
+    is_observed = ~np.isnan(votes)  # (n_voters, n_items) - includes skips
 
-    # Normalize by number of comments
-    d_matrix = disagreements.astype(float) / n_items
+    # Disagreement: one approves (1.0) and other disapproves (0.0)
+    # Using broadcasting: (n_voters, 1, n_items) vs (1, n_voters, n_items)
+    disagree = (
+        (is_approve[:, None, :] & is_disapprove[None, :, :]) |
+        (is_disapprove[:, None, :] & is_approve[None, :, :])
+    )
+    disagreements = disagree.sum(axis=2)  # (n_voters, n_voters)
+
+    # Denominator: number of comments both voters observed (includes skips)
+    both_observed = is_observed[:, None, :] & is_observed[None, :, :]
+    n_both_observed = both_observed.sum(axis=2)  # (n_voters, n_voters)
+
+    # Avoid division by zero
+    n_both_observed = np.maximum(n_both_observed, 1)
+
+    d_matrix = disagreements.astype(float) / n_both_observed
 
     return d_matrix
 
@@ -54,71 +70,50 @@ def compute_bridging_scores(matrix: np.ndarray) -> np.ndarray:
     For comment c with approvers N_c:
         b^PD(c) = (4/n²) × Σ_{i<j, i,j∈N_c} d_ij
 
-    Efficient O(m × n²) computation using:
-        Σ d_ij = (1/|C|) × Σ_{c'∈C} |N_c ∩ N_{c'}| × |N_c ∩ (V \ N_{c'})|
-
-    where |N_c ∩ N_{c'}| counts approvers of c who also approve c',
-    and |N_c ∩ (V \ N_{c'})| counts approvers of c who disapprove c'.
+    Handles skips (0.5) properly by delegating to compute_bridging_scores_vectorized.
 
     Args:
-        matrix: (n_items, n_voters) array with values 0.0 or 1.0
+        matrix: (n_items, n_voters) array with values 0.0, 0.5, 1.0, or NaN
 
     Returns:
         (n_items,) array of bridging scores in [0, 1]
     """
-    n_items, n_voters = matrix.shape
-
-    # Normalization constant: 4/n²
-    normalization = 4.0 / (n_voters ** 2)
-
-    # Convert to boolean for easier computation
-    approves = matrix.astype(bool)  # (n_items, n_voters)
-
-    bridging_scores = np.zeros(n_items)
-
-    for c in range(n_items):
-        # Approvers of comment c
-        approvers_c = approves[c]  # (n_voters,) boolean
-
-        # For each other comment c', count:
-        # - approvers of c who also approve c'
-        # - approvers of c who disapprove c'
-        total_disagreement = 0.0
-
-        for cp in range(n_items):
-            # Approvers of c who approve c'
-            approve_both = (approvers_c & approves[cp]).sum()
-            # Approvers of c who disapprove c'
-            approve_c_disapprove_cp = (approvers_c & ~approves[cp]).sum()
-
-            # This counts pairs (i,j) in N_c where i approves c' and j disapproves c'
-            total_disagreement += approve_both * approve_c_disapprove_cp
-
-        # Normalize by number of comments and apply 4/n² factor
-        bridging_scores[c] = normalization * total_disagreement / n_items
-
-    return bridging_scores
+    # Delegate to vectorized version which handles skips properly
+    return compute_bridging_scores_vectorized(matrix)
 
 
 def compute_bridging_scores_vectorized(matrix: np.ndarray) -> np.ndarray:
     """
     Vectorized version of compute_bridging_scores for better performance.
 
-    Uses matrix operations instead of explicit loops.
+    Handles skips (0.5) properly:
+    - Skips don't count as approvals or disapprovals
+    - Disagreement only when one voter approves (1.0) and other disapproves (0.0)
+    - Denominator includes all co-observed items (including skips)
 
     Args:
-        matrix: (n_items, n_voters) array with values 0.0 or 1.0
+        matrix: (n_items, n_voters) array with values 0.0, 0.5, 1.0, or NaN
 
     Returns:
         (n_items,) array of bridging scores in [0, 1]
     """
     n_items, n_voters = matrix.shape
 
+    # Check if we have skips or NaNs - if so, use disagreement matrix approach
+    has_skips = np.any(matrix == 0.5)
+    has_nans = np.any(np.isnan(matrix))
+
+    if has_skips or has_nans:
+        # Use disagreement matrix approach for proper skip handling
+        d_matrix = compute_pairwise_disagreement(matrix)
+        return compute_bridging_scores_from_disagreement(matrix, d_matrix)
+
+    # Fast path for fully observed binary data (no skips, no NaNs)
     # Normalization constant: 4/n²
     normalization = 4.0 / (n_voters ** 2)
 
     # Convert to boolean
-    approves = matrix.astype(bool)  # (n_items, n_voters)
+    approves = (matrix == 1.0)  # (n_items, n_voters)
 
     bridging_scores = np.zeros(n_items)
 
@@ -126,14 +121,12 @@ def compute_bridging_scores_vectorized(matrix: np.ndarray) -> np.ndarray:
         approvers_c = approves[c]  # (n_voters,)
 
         # For all comments c', compute intersection sizes with N_c
-        # approves has shape (n_items, n_voters)
-        # approvers_c has shape (n_voters,)
-
         # Number of approvers of c who also approve each c'
         approve_both = (approves & approvers_c).sum(axis=1)  # (n_items,)
 
-        # Number of approvers of c who disapprove each c'
-        approve_c_disapprove_cp = (~approves & approvers_c).sum(axis=1)  # (n_items,)
+        # Number of approvers of c who disapprove each c' (only 0.0, not skips)
+        disapproves = (matrix == 0.0)
+        approve_c_disapprove_cp = (disapproves & approvers_c).sum(axis=1)  # (n_items,)
 
         # Sum of products
         total_disagreement = (approve_both * approve_c_disapprove_cp).sum()
@@ -159,7 +152,8 @@ def compute_bridging_scores_from_disagreement(
         (n_items,) array of bridging scores in [0, 1]
     """
     n_items, n_voters = matrix.shape
-    approves = matrix.astype(bool)
+    # Use explicit == 1.0 check so 0.5 (pass) values are not treated as approvals
+    approves = (matrix == 1.0)
 
     # Normalization constant: 4/n²
     normalization = 4.0 / (n_voters ** 2)
@@ -301,7 +295,9 @@ def compute_pairwise_voting_scores(matrix: np.ndarray) -> dict:
     n_items, n_voters = matrix.shape
 
     # Convert to boolean
-    approves = matrix.astype(bool)  # (n_items, n_voters)
+    # Use explicit == 1.0 check so 0.5 (pass) values are not treated as approvals
+    approves = (matrix == 1.0)  # (n_items, n_voters)
+    disapproves = (matrix == 0.0)  # (n_items, n_voters)
 
     # Initialize scores
     approval_scores = np.zeros(n_items)
@@ -312,7 +308,7 @@ def compute_pairwise_voting_scores(matrix: np.ndarray) -> dict:
         for j in range(i + 1, n_voters):
             # Find agreements
             both_approve = approves[:, i] & approves[:, j]
-            both_disapprove = ~approves[:, i] & ~approves[:, j]
+            both_disapprove = disapproves[:, i] & disapproves[:, j]
 
             # Total agreements for this pair
             n_agreements = both_approve.sum() + both_disapprove.sum()
