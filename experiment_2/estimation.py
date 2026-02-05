@@ -61,8 +61,11 @@ def estimate_pairwise_disagreement_ipw(
             votes_i = observed_matrix[both_observed, i]
             votes_j = observed_matrix[both_observed, j]
 
-            # Indicator of disagreement
-            disagree = (votes_i != votes_j).astype(float)
+            # Indicator of disagreement (only 1.0 vs 0.0, not skips)
+            disagree = (
+                ((votes_i == 1.0) & (votes_j == 0.0)) |
+                ((votes_i == 0.0) & (votes_j == 1.0))
+            ).astype(float)
 
             # Joint inclusion probability: π_{ij,c} = π_{i,c} × π_{j,c}
             pi_i = clipped_probs[both_observed, i]
@@ -222,109 +225,224 @@ def estimate_bridging_scores_ipw_direct(
 def estimate_bridging_scores_naive(
     observed_matrix: np.ndarray,
     observed_mask: np.ndarray,
+    min_approvers: int = 5,
 ) -> np.ndarray:
     """
-    Naive bridging score estimation without IPW correction.
+    Naive PD bridging score estimation using splitter-based approach.
 
-    Simply computes bridging scores treating observed data as if it were
-    complete. This serves as a baseline for comparison.
+    For each target x and splitter y, estimates the PD contribution using:
+        b̂_PD(x,y) = 4 * â_{x|y} * ŵ_y * â_{x|ȳ} * (1 - ŵ_y)
 
-    b̂^PD(c) = (4/n²) × Σ_{i<j, i,j∈observed_N_c} d̂_ij
+    where:
+        ŵ_y = marginal approval rate of y among voters who observed y
+        â_{x|y} = P(approve x | approve y, observed both x and y)
+        â_{x|ȳ} = P(approve x | disapprove y, observed both x and y)
+
+    Final score is the average over all splitters y ≠ x.
 
     Args:
         observed_matrix: (n_items, n_voters) array with observed votes
         observed_mask: (n_items, n_voters) boolean array
+        min_approvers: minimum number of approvers required for a valid score
 
     Returns:
         (n_items,) array of estimated bridging scores in [0, 1]
     """
     n_items, n_voters = observed_matrix.shape
 
-    # Normalization constant: 4/n²
-    normalization = 4.0 / (n_voters ** 2)
+    # observed_mask as float for matrix operations
+    obs = observed_mask.astype(np.float64)
 
-    # Compute pairwise disagreement only on observed entries
-    d_naive = np.zeros((n_voters, n_voters))
+    # approve[c, v] = 1 if voter v observed and approved c, else 0
+    approve = np.where(observed_mask, observed_matrix, 0.0)
 
-    for i in range(n_voters):
-        for j in range(i + 1, n_voters):
-            # Find comments observed by both
-            both_observed = observed_mask[:, i] & observed_mask[:, j]
-            n_both = both_observed.sum()
+    # Co-observed counts: how many voters observed both c and c'
+    co_observed = obs @ obs.T  # (n_items, n_items)
 
-            if n_both == 0:
-                d_naive[i, j] = np.nan
-                d_naive[j, i] = np.nan
-                continue
+    # n_approve_cprime[c, c'] = voters who observed both c AND approved c'
+    n_approve_cprime = obs @ approve.T  # (n_items, n_items)
 
-            # Count disagreements
-            votes_i = observed_matrix[both_observed, i]
-            votes_j = observed_matrix[both_observed, j]
-            disagree_count = (votes_i != votes_j).sum()
+    # Marginal approval rate of c' among all voters who observed c'
+    obs_count = obs.sum(axis=1)  # (n_items,)
+    approve_count = approve.sum(axis=1)  # (n_items,)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        w_hat = approve_count / obs_count
+        w_hat = np.nan_to_num(w_hat, nan=0.5)
 
-            # Naive estimate: just use fraction of observed
-            d_naive[i, j] = disagree_count / n_both
-            d_naive[j, i] = d_naive[i, j]
+    # Broadcast w_hat[c'] over the (c, c') grid
+    w = w_hat[np.newaxis, :]  # shape (1, n_items), broadcasts to (n_items, n_items)
 
-    # Compute bridging scores
-    bridging_scores = np.zeros(n_items)
+    # both_approve[c, c'] = voters who observed both AND approved both
+    both_approve = approve @ approve.T  # (n_items, n_items)
 
-    for c in range(n_items):
-        observed_c = observed_mask[c, :]
-        if not observed_c.any():
-            bridging_scores[c] = np.nan
-            continue
+    # a_1[c, c'] = P(approve c | approve c', observed both)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_1 = both_approve / n_approve_cprime
+        a_1 = np.nan_to_num(a_1, nan=0.0)
 
-        approvers_mask = observed_c & (observed_matrix[c, :] == 1.0)
-        approver_indices = np.where(approvers_mask)[0]
+    # n_disapprove_cprime = voters who observed both AND disapproved c'
+    n_disapprove_cprime = co_observed - n_approve_cprime
 
-        if len(approver_indices) < 2:
-            bridging_scores[c] = 0.0
-            continue
+    # approve_c_disapprove_cprime = voters who observed both, approve c, disapprove c'
+    approve_c_and_obs_cprime = approve @ obs.T
+    approve_c_disapprove_cprime = approve_c_and_obs_cprime - both_approve
 
-        total = 0.0
-        count = 0
-        for idx_i in range(len(approver_indices)):
-            for idx_j in range(idx_i + 1, len(approver_indices)):
-                i = approver_indices[idx_i]
-                j = approver_indices[idx_j]
-                if not np.isnan(d_naive[i, j]):
-                    total += d_naive[i, j]
-                    count += 1
+    # a_2[c, c'] = P(approve c | disapprove c', observed both)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_2 = approve_c_disapprove_cprime / n_disapprove_cprime
+        a_2 = np.nan_to_num(a_2, nan=0.0)
 
-        # Apply normalization factor
-        if count > 0:
-            bridging_scores[c] = normalization * total
-        else:
-            bridging_scores[c] = 0.0
+    # PD term: 4 * a_1 * w * a_2 * (1 - w)
+    terms = 4 * a_1 * w * a_2 * (1 - w)
 
-    return bridging_scores
+    # Zero out diagonal (can't use x as its own splitter)
+    np.fill_diagonal(terms, 0.0)
+
+    # Average over valid splitters (where co_observed > 0)
+    valid_pairs = co_observed > 0
+    np.fill_diagonal(valid_pairs, False)
+    n_valid = valid_pairs.sum(axis=1)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        scores = np.where(n_valid > 0, (terms * valid_pairs).sum(axis=1) / n_valid, 0.0)
+
+    # Zero out scores for items with fewer than min_approvers
+    scores = np.where(approve_count >= min_approvers, scores, 0.0)
+
+    return scores
 
 
 def estimate_pnorm_naive(
     observed_matrix: np.ndarray,
     observed_mask: np.ndarray,
     p: float = -10.0,
+    min_approvers: int = 5,
 ) -> np.ndarray:
     """
     Naive p-norm estimation from partially observed data.
 
-    Simply computes p-norm scores treating observed data as complete,
-    using NaN for missing values.
+    Computes p-norm bridging scores using only observed entries.
+    For each pair (c, c'), approval rates a_1 and a_2 are computed
+    among voters who observed *both* c and c'.
 
     Args:
         observed_matrix: (n_items, n_voters) array with observed votes (NaN for missing)
         observed_mask: (n_items, n_voters) boolean array
         p: p-norm parameter (default -10 for approx min)
+        min_approvers: minimum number of approvers required for a valid score
 
     Returns:
         (n_items,) array of estimated p-norm bridging scores
     """
-    # Create a matrix where unobserved entries are NaN
-    matrix_with_nan = np.where(observed_mask, observed_matrix, np.nan)
+    matrix = np.where(observed_mask, observed_matrix, np.nan)
+    n_items, n_voters = matrix.shape
 
-    # Use nanmean for approval calculations
-    return compute_bridging_pnorm(matrix_with_nan, p=p)
+    # For each pair (c, c'), we need voters who observed both
+    # observed_mask is boolean (n_items, n_voters)
+    obs = observed_mask.astype(np.float64)
+
+    # Co-observed counts: how many voters observed both c and c'
+    co_observed = obs @ obs.T  # (n_items, n_items)
+
+    # Among co-observed voters, count approvers of c'
+    # For voters who observed both c and c', how many approve c'?
+    # obs[c] * matrix[c'] gives approve-c' indicator only where both observed
+    # But we need: voters who observed c AND observed c' AND approve c'
+    approve = np.where(observed_mask, observed_matrix, 0.0)
+
+    # n_approve_cprime_among_coobs[c, c'] = sum over voters of obs[c,v] * obs[c',v] * matrix[c',v]
+    n_approve_cprime = obs @ approve.T  # (n_items, n_items)
+
+    # Marginal approval rate of c' among all voters who observed c'
+    # (not conditioned on also observing c)
+    obs_count = obs.sum(axis=1)  # (n_items,)
+    approve_count = approve.sum(axis=1)  # (n_items,)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        w_hat = approve_count / obs_count
+        w_hat = np.nan_to_num(w_hat, nan=0.5)  # default to 0.5 if no observations
+
+    # Broadcast w_hat[c'] over the (c, c') grid
+    w = w_hat[np.newaxis, :]  # shape (1, n_items), broadcasts to (n_items, n_items)
+
+    # both_approve[c, c'] = voters who observed both, approve both
+    both_approve = approve @ approve.T  # (n_items, n_items)
+
+    # a_1[c, c'] = P(approve c | approve c', observed both)
+    #            = both_approve[c,c'] / n_approve_cprime[c',c] ... wait
+    # n_approve_cprime[c, c'] = voters who observed c AND approved c'
+    # We need: voters who observed both c and c' AND approved c'
+    # That's: sum_v obs[c,v] * obs[c',v] * approve[c',v] = n_approve_cprime[c, c']
+    # And among those, how many also approve c?
+    # = sum_v obs[c,v] * obs[c',v] * approve[c',v] * approve[c,v] = approve[c] * (obs[c'] * approve[c']).T
+    # = (approve * (obs * approve).T) ... no, let's think again
+
+    # Voters who observed both c and c' and approve c': mask_both_approve_cprime[v] = obs[c,v] * obs[c',v] * approve[c',v]
+    # Among those, approve c: approve[c,v]
+    # So a_1[c,c'] = sum_v (approve[c,v] * obs[c,v] * obs[c',v] * approve[c',v]) / sum_v (obs[c,v] * obs[c',v] * approve[c',v])
+    # Numerator = sum_v approve[c,v] * approve[c',v] * obs[c,v] * obs[c',v]
+    # But approve[c,v] is 0 when not observed (we set it to 0), and approve already has obs baked in
+    # Actually approve[c,v] = matrix[c,v] if observed, 0 if not. So approve[c,v]*approve[c',v] counts
+    # voters who are observed on both AND approve both. But obs[c,v]*obs[c',v] is redundant when
+    # multiplied with approve, since approve is 0 when not observed.
+    # So numerator = both_approve[c,c'] and denominator = n_approve_cprime[c,c']
+    # But wait: n_approve_cprime[c,c'] = obs[c] @ approve[c'].T = sum_v obs[c,v]*approve[c',v]
+    # This counts voters observed on c who approve c'. They might not be observed on c' though!
+    # No — approve[c',v] = matrix[c',v] if obs[c',v] else 0. So approve[c',v] > 0 implies obs[c',v].
+    # So obs[c,v]*approve[c',v] > 0 implies obs on both c and c'.
+    # Therefore n_approve_cprime[c,c'] = voters observed on both who approve c'. Correct.
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_1 = both_approve / n_approve_cprime
+        a_1 = np.nan_to_num(a_1, nan=0.0)
+
+    # n_disapprove_cprime[c,c'] = co_observed[c,c'] - n_approve_cprime[c,c']
+    n_disapprove_cprime = co_observed - n_approve_cprime
+
+    # approve_c_disapprove_cprime[c,c'] = voters co-observed who approve c but disapprove c'
+    # = sum_v approve[c,v] * obs[c',v] * (1 - approve[c',v]) where obs on both
+    # = sum_v approve[c,v] * obs[c',v] - approve[c,v] * approve[c',v]
+    # = (approve @ obs.T)[c,c'] - both_approve[c,c']
+    approve_c_and_obs_cprime = approve @ obs.T
+    approve_c_disapprove_cprime = approve_c_and_obs_cprime - both_approve
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        a_2 = approve_c_disapprove_cprime / n_disapprove_cprime
+        a_2 = np.nan_to_num(a_2, nan=0.0)
+
+    # Compute p-norm terms
+    # Broadcast w to full (n_items, n_items) for boolean indexing
+    w_cprime = np.broadcast_to(w, (n_items, n_items)).copy()
+
+    if p < 0:
+        # For negative p, a^p diverges if a=0, so term should be 0 when a_1=0 or a_2=0
+        safe_a1 = np.where(a_1 > 0, a_1, 0.0)
+        safe_a2 = np.where(a_2 > 0, a_2, 0.0)
+        both_positive = (safe_a1 > 0) & (safe_a2 > 0)
+        terms = np.zeros((n_items, n_items))
+        terms[both_positive] = (
+            w_cprime[both_positive] * safe_a1[both_positive] ** p
+            + (1 - w_cprime[both_positive]) * safe_a2[both_positive] ** p
+        ) ** (1.0 / p)
+    else:
+        terms = (w_cprime * a_1 ** p + (1 - w_cprime) * a_2 ** p) ** (1.0 / p)
+        terms = np.nan_to_num(terms, nan=0.0)
+
+    # Zero out diagonal
+    np.fill_diagonal(terms, 0.0)
+
+    # Average over c' != c, but only where co_observed > 0
+    valid_pairs = co_observed > 0
+    np.fill_diagonal(valid_pairs, False)
+    n_valid = valid_pairs.sum(axis=1)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        scores = np.where(n_valid > 0, (terms * valid_pairs).sum(axis=1) / n_valid, 0.0)
+
+    # Zero out scores for items with fewer than min_approvers
+    approve_count = approve.sum(axis=1)
+    scores = np.where(approve_count >= min_approvers, scores, 0.0)
+
+    return scores
 
 
 # =============================================================================
@@ -375,7 +493,11 @@ def estimate_bridging_scores_truncated_ipw(
 
             votes_i = observed_matrix[both_observed, i]
             votes_j = observed_matrix[both_observed, j]
-            disagree = (votes_i != votes_j).astype(float)
+            # Disagreement: only 1.0 vs 0.0, not skips
+            disagree = (
+                ((votes_i == 1.0) & (votes_j == 0.0)) |
+                ((votes_i == 0.0) & (votes_j == 1.0))
+            ).astype(float)
 
             # Joint inclusion probability with truncated weights
             pi_i = clipped_probs[both_observed, i]
@@ -480,7 +602,11 @@ def estimate_bridging_scores_aipw(
 
             votes_i = observed_matrix[both_observed, i]
             votes_j = observed_matrix[both_observed, j]
-            disagree_count = (votes_i != votes_j).sum()
+            # Only count 1.0 vs 0.0 as disagreement (skips don't disagree with anything)
+            disagree_count = (
+                ((votes_i == 1.0) & (votes_j == 0.0)) |
+                ((votes_i == 0.0) & (votes_j == 1.0))
+            ).sum()
 
             d_naive[i, j] = disagree_count / n_both
             d_naive[j, i] = d_naive[i, j]
@@ -497,7 +623,11 @@ def estimate_bridging_scores_aipw(
 
             votes_i = observed_matrix[both_observed, i]
             votes_j = observed_matrix[both_observed, j]
-            disagree = (votes_i != votes_j).astype(float)
+            # Only count 1.0 vs 0.0 as disagreement (skips don't disagree with anything)
+            disagree = (
+                ((votes_i == 1.0) & (votes_j == 0.0)) |
+                ((votes_i == 0.0) & (votes_j == 1.0))
+            ).astype(float)
 
             # Residuals from outcome model
             residuals = disagree - d_naive[i, j]
